@@ -1,0 +1,43 @@
+{
+  "name": "adv-zlib",
+  "version": "0.1.0",
+  "description": "Advanced zlib utilities",
+  "type": "module",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/mjs/index.js",
+  "types": "./dist/mjs/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/mjs/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/mjs/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "rm -rf dist && node build.js",
+    "test": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "zlib",
+    "compression"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/archiver": "^6.0.3",
+    "@types/node": "^20.0.0",
+    "archiver": "^7.0.1",
+    "typescript": "^5.0.0",
+    "vitest": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "dependencies": {
+    "find-cache-dir": "^5.0.0"
+  }
+}
