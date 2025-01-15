@@ -4,7 +4,7 @@
   "description": "Advanced zlib utilities",
   "type": "module",
   "main": "./dist/cjs/index.cjs",
-  "module": "./dist/mjs/index.js",
+  "module": "./dist/esm/index.js",
   "types": "./dist/types/index.d.ts",
   "files": [
     "dist"
@@ -14,7 +14,7 @@
       "types": "./dist/types/index.d.ts",
       "import": {
         "types": "./dist/types/index.d.ts",
-        "default": "./dist/mjs/index.js"
+        "default": "./dist/esm/index.js"
       },
       "require": {
         "types": "./dist/types/index.d.ts",
