@@ -3,10 +3,10 @@ import fsPromises from "node:fs/promises";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 // import findCacheDirectory from 'find-cache-dir';
-import { CentralDir, CentralDirOptions } from "./central-dir";
-import { ZipEntry } from "./entry";
-import { Logger } from "./types";
-import { ensureDirectoryExists } from "./utils";
+import { CentralDir, CentralDirOptions } from "./central-dir.js";
+import { ZipEntry } from "./entry.js";
+import { Logger } from "./types.js";
+import { ensureDirectoryExists } from "./utils.js";
 
 export interface AdvZlibOptions {
   logger?: Logger;

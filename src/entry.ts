@@ -6,9 +6,9 @@ import { PassThrough, Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import zlib from 'node:zlib';
 
-import { CentralDirFileHeader } from './cdfh';
-import { Logger } from './types';
-import { ensureDirectoryExists } from './utils';
+import { CentralDirFileHeader } from './cdfh.js';
+import { Logger } from './types.js';
+import { ensureDirectoryExists } from './utils.js';
 
 enum CompressionMethod {
   NONE = 0,

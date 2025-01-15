@@ -1,4 +1,3 @@
-import fs from 'node:fs';
 import { promises as fsPromises } from 'node:fs';
 import { Logger, MemoryUsage } from './types.js';
 

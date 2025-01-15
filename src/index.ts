@@ -1,3 +1,3 @@
-export * from './adv-zlib';
-export * from './entry';
-export * from './types';
+export * from './adv-zlib.js';
+export * from './entry.js';
+export * from './types.js';

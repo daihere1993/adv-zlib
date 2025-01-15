@@ -1,11 +1,11 @@
 import assert from 'node:assert';
 import fs from 'node:fs';
 import { FileHandle } from 'node:fs/promises';
-import { CentralDirFileHeader } from './cdfh';
-import { ZipEntry } from './entry';
-import { EndOfCentralDirRecord } from './eocd';
-import { Logger } from './types';
-import { testMemoryUsage } from './utils';
+import { CentralDirFileHeader } from './cdfh.js';
+import { ZipEntry } from './entry.js';
+import { EndOfCentralDirRecord } from './eocd.js';
+import { Logger } from './types.js';
+import { testMemoryUsage } from './utils.js';
 
 export interface CentralDirOptions {
   logger: Logger;
