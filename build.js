@@ -7,7 +7,7 @@ async function build() {
   try {
     // Build MJS version
     console.log('Building ESM version...');
-    await execAsync('npx tsc -p tsconfig.mjs.json');
+    await execAsync('npx tsc -p tsconfig.esm.json');
     
     // Build CJS version
     console.log('Building CJS version...');
