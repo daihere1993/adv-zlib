@@ -15,7 +15,7 @@ yarn.lock
 .env.*.local
 
 # Build output
-# dist/
+dist/
 build/
 coverage/
 
