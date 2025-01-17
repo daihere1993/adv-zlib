@@ -105,7 +105,7 @@ export class AdvZlib {
       return false;
     }
 
-    const entry = centralDir.entries.find((entry) => entry.fullPath === src);
+    const entry = centralDir.entries.find((entry) => this.matchEntryByFullPath(entry, src));
     const exsistence = !!entry;
     this.cachedExistenceInfos.set(src, exsistence);
 
@@ -525,5 +525,13 @@ export class AdvZlib {
         return null;
       }
     }
+  }
+
+  private matchEntryByFullPath(entry: ZipEntry, src: string): boolean {
+    // trim last "/" or "\" of entry.fullPath
+    const entryFullPath = entry.fullPath.replace(/\/|\\/g, "");
+    // trim "/" or "\" of src
+    const srcPath = src.replace(/\/|\\/g, "");
+    return entryFullPath === srcPath;
   }
 }

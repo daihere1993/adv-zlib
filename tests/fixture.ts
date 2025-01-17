@@ -1,128 +1,106 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import archiver from 'archiver';
-import { assert } from 'node:console';
 
 export const DEFAULT_CONTENT = 'TEST';
 
 /**
- * Case1: ['a.txt'] => ['/a.txt']
- * Case2: ['a/b.txt'] => ['/a/b.txt']
- * Case3: ['a/b.txt', 'a/c.txt'] => ['a/']
+ * Function to create a ZIP file based on a given structure and base directory.
+ * @param {string} baseDir - The base directory where the ZIP file should be created.
+ * @param {string} structure - The hierarchical structure of files and folders.
  */
-function createEntries(baseDir: string, files: string[]): Set<string> {
-  const entries = new Set<string>();
-  for (const file of files) {
-    let entry: string | undefined = undefined, baseDir_ = baseDir;
-    const segs = file.split('/');
+export async function createZipFromStructure(baseDir: string, structure: string): Promise<void> {
+  // Helper function to recursively add entries to the ZIP
+  const processStructure = async (archive: archiver.Archiver, lines: string[]): Promise<void> => {
+    const indentPattern: RegExp = /^(\s*)(.+)$/;
+    let stack: { indent: number; path: string }[] = [{ indent: 0, path: '' }];
 
-    for (const seg of segs) {
-      const isFile = seg.includes('.');
-      const isFolder = !isFile;
+    while (lines.length > 0) {
+      const line: string = lines.shift()!;
+      if (!line.trim()) continue; // Skip empty or whitespace-only lines
 
-      if (isFolder) {
-        const folderDir = path.join(baseDir_, seg);
-        if (!fs.existsSync(folderDir)) {
-          fs.mkdirSync(folderDir);
-        }
-        entry = folderDir;
-        baseDir_ = folderDir;
-      } else if (isFile) {
-        const filePath = path.join(baseDir_, seg);
-        entry = entry || filePath;
-        fs.writeFileSync(filePath, DEFAULT_CONTENT);
-        entries.add(entry);
-        break;
-      } else {
-        throw new Error(`Invalid file path: ${file}`);
+      const match = line.match(indentPattern);
+      if (!match) continue;
+
+      const indent: number = match[1].length;
+      const name: string = match[2]
+        .trim()
+        .replace(/^└──\s*/, '')
+        .trim(); // Remove visual markers like "└──"
+
+      // Navigate the stack to the correct parent path based on indentation
+      while (stack.length && stack[stack.length - 1].indent >= indent) {
+        stack.pop();
+      }
+
+      const parent = stack[stack.length - 1] || { path: '' };
+      const fullPath: string = `${parent.path}${parent.path && !parent.path.endsWith('/') ? '/' : ''}${name}`;
+
+      // if no extension that is a directory
+      if (!name.includes('.')) {
+        // Directory
+        archive.append('', { name: fullPath.endsWith('/') ? fullPath : `${fullPath}/` });
+        stack.push({ indent, path: fullPath });
+      } else if (name.endsWith('.zip') && stack.length > 0) {
+        // Nested ZIP
+        const nestedArchive = archiver('zip', { zlib: { level: 9 } });
+        const nestedBuffer = await new Promise<Buffer>((resolve, reject) => {
+          const buffers: Buffer[] = [];
+          nestedArchive.on('data', (chunk) => buffers.push(chunk));
+          nestedArchive.on('end', () => resolve(Buffer.concat(buffers)));
+          nestedArchive.on('error', reject);
+
+          // Extract lines belonging to this nested ZIP based on indentation
+          const startIdx = lines.indexOf(line) + 1;
+          const nestedLines: string[] = [];
+          let i = startIdx;
+          while (i < lines.length) {
+            const nestedLine = lines[i];
+            const currentIndent = nestedLine.match(indentPattern)?.[1].length ?? 0;
+            if (currentIndent <= indent) break; // Stop when no longer nested
+            nestedLines.push(lines.splice(i, 1)[0]); // Remove the line from `lines` and add to `nestedLines`
+          }
+
+          processStructure(nestedArchive, nestedLines)
+            .then(() => nestedArchive.finalize())
+            .catch(reject);
+        });
+        archive.append(nestedBuffer, { name: fullPath });
+        stack.push({ indent, path: fullPath });
+      } else if (name.endsWith('.txt')) {
+        // Text file
+        archive.append(DEFAULT_CONTENT, { name: fullPath });
       }
     }
-  }
-  return entries;
-}
+  };
 
-function createFolder(baseDir: string, folder: string, childEntries: Set<string>) {
-  assert(folder, 'The folder name should not be empty');
-  
-  const folderPath = path.join(baseDir, folder);
+  // Parse structure to find the main ZIP file name
+  const lines: string[] = structure.split('\n').filter((line) => line.trim().length > 0);
+  const zipFileNameMatch = lines[0].match(/(.+\.zip)$/);
 
-  if (fs.existsSync(folderPath)) {
-    fs.rmSync(folderPath, { recursive: true });
+  if (!zipFileNameMatch) {
+    throw new Error('Invalid structure: Root ZIP file name not found');
   }
 
-  fs.mkdirSync(folderPath, { recursive: true });
-  for (const childEntry of childEntries) {
-    assert(fs.existsSync(childEntry), `The child entry ${childEntry} does not exist`);
-    fs.renameSync(childEntry, path.join(folderPath, path.basename(childEntry)));
-  }
-  return folderPath;
-}
+  const zipFileName: string = zipFileNameMatch[1].trim();
+  const outputPath: string = path.join(baseDir, zipFileName);
 
-function createZipFile(baseDir: string, zipFile: string, childEntries: Set<string>): Promise<string> {
   return new Promise((resolve, reject) => {
-    const zipFilePath = path.join(baseDir, zipFile);
+    const output = fs.createWriteStream(outputPath);
     const archive = archiver('zip', { zlib: { level: 9 } });
-    const output = fs.createWriteStream(zipFilePath);
 
     output.on('close', () => {
-      childEntries.forEach((entry) => {
-        fs.rmSync(entry, { recursive: true });
-      });
-      resolve(zipFilePath);
+      console.log(`ZIP file created at ${outputPath} (${archive.pointer()} bytes)`);
+      resolve();
     });
 
-    output.on('error', (err) => {
-      reject(err);
-    });
+    archive.on('error', (err) => reject(err));
 
     archive.pipe(output);
 
-    for (const entry of childEntries) {
-      assert(fs.existsSync(entry), `The child entry ${entry} does not exist`);
-      if (fs.statSync(entry).isDirectory()) {
-        archive.directory(entry, path.basename(entry));
-      } else {
-        archive.file(entry, { name: path.basename(entry) });
-      }
-    }
-
-    archive.finalize();
+    // Add entries to the ZIP
+    processStructure(archive, lines.splice(1))
+      .then(() => archive.finalize())
+      .catch(reject);
   });
-}
-
-/**
- * Summary: create zip assets quickly and easily for testing
- * Supported formats:
- *  - '/b.zip/c.txt'
- *  - '/b.zip', ['c.txt', 'd.txt']
- *  - '/b.zip/c/d.txt'
- *  - '/b.zip/c/', ['d.txt', 'e.txt']
- *  - '/b.zip/c.zip/d.txt'
- *  - '/b.zip/c/d/e.zip/f.txt'
- *  - '/b.zip', ['c/c1.txt', 'c/c2.txt'] 
- */
-export async function createZip(baseDir: string, src: string, subEntries: string[] = []) {
-  let childEntries = createEntries(baseDir, subEntries);
-  
-  const segs = src.split('/');
-  for (let i = segs.length - 1; i >= 0; i--) {
-    const entry = segs[i];
-
-    if (!entry) {
-      continue;
-    }
-
-    const isFolder = !entry.includes('.');
-    if (entry.endsWith('.zip')) {
-      const zipFilePath = await createZipFile(baseDir, entry, childEntries);
-      childEntries.clear();
-      childEntries.add(zipFilePath);
-    } else if (isFolder) {
-      const folderPath = createFolder(baseDir, entry, childEntries);
-      childEntries.clear();
-      childEntries.add(folderPath);
-    } else {
-      childEntries = createEntries(baseDir, [entry]);
-    }
-  }
 }
