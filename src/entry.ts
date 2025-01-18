@@ -5,6 +5,7 @@ import path from 'node:path';
 import { PassThrough, Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import zlib from 'node:zlib';
+import { createHash } from 'crypto';
 
 import { CentralDirFileHeader } from './cdfh.js';
 import { Logger } from './types.js';
@@ -25,6 +26,7 @@ export class LocalFileHeader {
   static SIGNATURE = 0x04034b50;
 
   public totalSize!: number;
+  public crc32!: number;
   public fileNameLength!: number;
   public extraFieldLength!: number;
 
@@ -33,6 +35,7 @@ export class LocalFileHeader {
       throw new Error('The signature is not correct');
     }
 
+    this.crc32 = minimalData.readUInt32LE(14);
     this.fileNameLength = minimalData.readUInt16LE(26);
     this.extraFieldLength = minimalData.readUInt16LE(28);
 
@@ -54,10 +57,6 @@ export class FileData {
       return Readable.from(this.extractDataFromBuffer(src));
     }
 
-    if (!src.endsWith('.zip')) {
-      throw new Error(`The file ${src} is not a zip file.`);
-    }
-
     if (!fs.existsSync(src)) {
       throw new Error(`The file ${src} does not exist.`);
     }
@@ -72,10 +71,6 @@ export class FileData {
   public async extractData(src: string | Buffer): Promise<Buffer> {
     if (Buffer.isBuffer(src)) {
       return this.extractDataFromBuffer(src);
-    }
-
-    if (!src.endsWith('.zip')) {
-      throw new Error(`The file ${src} is not a zip file.`);
     }
 
     if (!fs.existsSync(src)) {
@@ -128,6 +123,7 @@ export class ZipEntry {
   private cachePath?: string;
   private decompressedData?: Buffer;
   private outerZipPath!: string;
+  private cacheDir = '/tmp/adv-zlib';
 
   public get isCached(): boolean {
     return !!this.cachePath || !!this.decompressedData;
@@ -177,11 +173,7 @@ export class ZipEntry {
     }
 
     if (this.cdfh.compressionMethod === CompressionMethod.NONE) {
-      if (Buffer.isBuffer(this.dataSource)) {
-        return Readable.from(this.dataSource);
-      } else {
-        return fs.createReadStream(this.dataSource);
-      }
+      return this.fileData.createReadStream(this.dataSource);
     } else if (this.cdfh.compressionMethod === CompressionMethod.DEFLATED) {
       return this.createInflateStream();
     } else {
@@ -211,6 +203,60 @@ export class ZipEntry {
     }
   }
 
+  public generateCacheFilePath() {
+    // Combine size and CRC32 into a string
+    const uniqueKey = `${this.size}:${this.lfh.crc32}`;
+    // Hash the string to create a unique file name
+    const hash = createHash('sha256').update(uniqueKey).digest('hex');
+
+    // Return the full path to the cache file
+    return path.join(this.cacheDir, hash);
+  }
+
+  public async cacheData(maxCacheSize: number): Promise<Buffer | string | null> {
+    if (!this.fileData) {
+      await this.init();
+    }
+
+    if (this.isCached) {
+      return this.getCachedData();
+    }
+
+    if (this.size >= maxCacheSize) {
+      const cacheFile = this.generateCacheFilePath();
+      if (fs.existsSync(cacheFile)) {
+        return cacheFile;
+      }
+
+      await ensureDirectoryExists(path.dirname(cacheFile));
+      const writeStream = fs.createWriteStream(cacheFile);
+      const readStream = await this.createReadStream();
+
+      try {
+        await pipeline(readStream, writeStream);
+        this.logger.info(`[AdvZlib.Entry] handleEntryData(): Cached large entry to ${cacheFile}`);
+        this.onCache(cacheFile);
+        return cacheFile;
+      } catch (err: any) {
+        this.logger.error(`[AdvZlib.Entry] handleEntryData(): Failed to cache entry ${this.relPath}: ${err.message}`);
+        return null;
+      }
+    } else {
+      try {
+        const data = await this.read();
+        if (data.length === 0) {
+          this.logger.warn(`[AdvZlib] handleEntryData(): Entry ${this.relPath} is empty.`);
+          return null;
+        }
+        this.onCache(data);
+        return data;
+      } catch (err: any) {
+        this.logger.error(`[AdvZlib] handleEntryData(): Failed to read entry ${this.relPath}: ${err.message}`);
+        return null;
+      }
+    }
+  }
+
   public async extract(dest: string): Promise<string> {
     if (!this.fileData) {
       await this.init();
@@ -222,7 +268,7 @@ export class ZipEntry {
       return path.join(dest, this.name);
     }
 
-    dest = await this.checkIfDestIsDir(dest) ? path.join(dest, this.name) : dest;
+    dest = (await this.checkIfDestIsDir(dest)) ? path.join(dest, this.name) : dest;
     const readStream = await this.createReadStream();
     const writeStream = fs.createWriteStream(dest);
 

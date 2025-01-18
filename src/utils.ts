@@ -7,11 +7,10 @@ import { Logger, MemoryUsage } from './types.js';
  */
 export async function ensureDirectoryExists(dirPath: string): Promise<void> {
   try {
-    if (!(await fileDirExists(dirPath))) {
-      await fsPromises.mkdir(dirPath, { recursive: true });
-    }
+    // check if dirPath is a directory
+    await fsPromises.mkdir(dirPath, { recursive: true });
   } catch (err: any) {
-    throw err;
+    return;
   }
 }
 

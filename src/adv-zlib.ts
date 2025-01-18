@@ -245,7 +245,8 @@ export class AdvZlib {
         if (this.cachedCentralDirs.has(accumulatedPath)) {
           centralDir = this.getCentralDirFromCache(accumulatedPath);
         } else {
-          const entryData = await this.handleEntryData(entry, accumulatedPath);
+          const entryData = await entry.cacheData(this.maxCacheSize);
+
           if (Buffer.isBuffer(entryData)) {
             centralDir = await this._getOrInitCentralDir(accumulatedPath, entryData);
           } else if (typeof entryData === 'string') {
@@ -384,47 +385,6 @@ export class AdvZlib {
     }
 
     return entry;
-  }
-
-  /**
-   * Handle reading and caching of a ZIP entry
-   * @param entry The ZIP entry to handle
-   * @param zipFilePath The current ZIP file path
-   * @returns The entry data buffer or null if cached to disk
-   */
-  private async handleEntryData(entry: ZipEntry, zipFilePath: string): Promise<Buffer | string | null> {
-    if (entry.size >= this.maxCacheSize) {
-      const segs = this.splitZipPathIntoSegs(zipFilePath);
-      segs[0] = path.basename(segs[0]);
-      const cacheFile = path.join(this.cacheDir, ...segs);
-
-      await ensureDirectoryExists(path.dirname(cacheFile));
-      const writeStream = fs.createWriteStream(cacheFile);
-      const readStream = await entry.createReadStream();
-
-      try {
-        await pipeline(readStream, writeStream);
-        this.logger.info(`[AdvZlib] handleEntryData(): Cached large entry to ${cacheFile}`);
-        entry.onCache(cacheFile);
-        return cacheFile;
-      } catch (err: any) {
-        this.logger.error(`[AdvZlib] handleEntryData(): Failed to cache entry ${entry.relPath}: ${err.message}`);
-        return null;
-      }
-    } else {
-      try {
-        const data = await entry.read();
-        if (data.length === 0) {
-          this.logger.warn(`[AdvZlib] handleEntryData(): Entry ${entry.relPath} is empty.`);
-          return null;
-        }
-        entry.onCache(data);
-        return data;
-      } catch (err: any) {
-        this.logger.error(`[AdvZlib] handleEntryData(): Failed to read entry ${entry.relPath}: ${err.message}`);
-        return null;
-      }
-    }
   }
 
   private matchEntryByFullPath(entry: ZipEntry, src: string): boolean {
