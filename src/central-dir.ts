@@ -32,8 +32,9 @@ export class CentralDir {
     this.dataSource = opts.dataSource || src;
 
     if (Buffer.isBuffer(this.dataSource)) {
-      // Assert the buffer size should under 50MB
-      assert(this.dataSource.length < 50 * 1024 * 1024, 'The buffer size should under 50MB');
+      if (this.dataSource.length > 50 * 1024 * 1024) {
+        throw new Error('The buffer size should under 50MB');
+      }
     }
   }
 
@@ -92,9 +93,15 @@ export class CentralDir {
       fd.copy(eocdBuf, 0, stat.size - eocdSize, stat.size);
     }
 
-    const signatureBuffer = Buffer.alloc(4);
-    signatureBuffer.writeUInt32LE(EndOfCentralDirRecord.SIGNATURE);
-    const signatureIndex = eocdBuf.indexOf(signatureBuffer);
+    const signature = EndOfCentralDirRecord.SIGNATURE;
+    let signatureIndex = -1;
+
+    for (let i = eocdSize - 4; i >= 0; i--) {
+      if (eocdBuf.readUInt32LE(i) === signature) {
+        signatureIndex = i;
+        break;
+      }
+    }
 
     if (signatureIndex === -1) {
       throw new Error(`[AdvZlib.CentralDir] extractEOCDBuffer(): EOCD signature not found in ${this.src}`);

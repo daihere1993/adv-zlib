@@ -29,8 +29,9 @@ export class LocalFileHeader {
   public extraFieldLength!: number;
 
   constructor(minimalData: Buffer) {
-    assert(minimalData.length === LocalFileHeader.MIN_SIZE, 'The buffer size should be 30');
-    assert(minimalData.readUInt32LE(0) === LocalFileHeader.SIGNATURE, 'The signature is not correct');
+    if (minimalData.readUInt32LE(0) !== LocalFileHeader.SIGNATURE) {
+      throw new Error('The signature is not correct');
+    }
 
     this.fileNameLength = minimalData.readUInt16LE(26);
     this.extraFieldLength = minimalData.readUInt16LE(28);

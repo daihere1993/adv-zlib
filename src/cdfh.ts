@@ -23,7 +23,9 @@ export class CentralDirFileHeader {
   private fileNameBuffer?: Buffer;
 
   constructor(minimalData: Buffer) {
-    assert(minimalData.readUInt32LE(0) === CentralDirFileHeader.SIGNATURE, 'The signature is not correct');
+    if (minimalData.readUInt32LE(0) !== CentralDirFileHeader.SIGNATURE) {
+      throw new Error('The signature is not correct');
+    }
 
     this.compressionMethod = minimalData.readUInt16LE(10);
     this.compressedSize = minimalData.readUInt32LE(20);
