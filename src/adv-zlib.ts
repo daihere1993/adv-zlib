@@ -6,7 +6,7 @@ import { pipeline } from 'node:stream/promises';
 import { CentralDir, CentralDirOptions } from './central-dir.js';
 import { ZipEntry } from './entry.js';
 import { Logger } from './types.js';
-import { ensureDirectoryExists } from './utils.js';
+import { ensureDirectoryExists, fileDirExists } from './utils.js';
 
 export interface AdvZlibOptions {
   logger?: Logger;
@@ -82,7 +82,7 @@ export class AdvZlib {
       return this.cachedExistenceInfos.get(src) ?? false;
     }
 
-    if (await this.checkFileExists(src)) {
+    if (await fileDirExists(src)) {
       return true;
     }
 
@@ -123,11 +123,11 @@ export class AdvZlib {
       throw new Error(`[AdvZlib] extract(): ZIP file ${src} does not exist.`);
     }
 
-    if (src.endsWith('.zip') && !(await this.checkFileExists(dest))) {
+    if (src.endsWith('.zip') && !(await fileDirExists(dest))) {
       throw new Error(`[AdvZlib] extract(): As ${src} is a zip file, ${dest} must be an existing directory.`);
     }
 
-    if (!src.endsWith('.zip') && !(await this.checkFileExists(path.dirname(dest)))) {
+    if (!src.endsWith('.zip') && !(await fileDirExists(path.dirname(dest)))) {
       throw new Error(`[AdvZlib] extract(): ${path.dirname(dest)} does not exist.`);
     }
 
@@ -222,7 +222,7 @@ export class AdvZlib {
 
       if (!centralDir) {
         // Handle outermost ZIP file
-        const exists = await this.checkFileExists(accumulatedPath);
+        const exists = await fileDirExists(accumulatedPath);
         if (!exists) {
           throw new Error(`[AdvZlib] getOrInitCentralDir(): ZIP file ${accumulatedPath} does not exist.`);
         }
@@ -361,20 +361,6 @@ export class AdvZlib {
 
     const zipPathSegs = this.splitZipPathIntoSegs(src).filter((seg) => seg.endsWith('.zip'));
     return path.join(...zipPathSegs);
-  }
-
-  /**
-   * Check if a file exists asynchronously
-   * @param filePath The path to the file
-   * @returns A promise that resolves to true if exists, false otherwise
-   */
-  private async checkFileExists(filePath: string): Promise<boolean> {
-    try {
-      await fsPromises.access(filePath);
-      return true;
-    } catch {
-      return false;
-    }
   }
 
   /**

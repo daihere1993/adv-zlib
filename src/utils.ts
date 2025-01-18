@@ -7,9 +7,25 @@ import { Logger, MemoryUsage } from './types.js';
  */
 export async function ensureDirectoryExists(dirPath: string): Promise<void> {
   try {
-    await fsPromises.mkdir(dirPath, { recursive: true });
+    if (!(await fileDirExists(dirPath))) {
+      await fsPromises.mkdir(dirPath, { recursive: true });
+    }
   } catch (err: any) {
     throw err;
+  }
+}
+
+/**
+ * Check if a file exists asynchronously
+ * @param filePath The path to the file
+ * @returns A promise that resolves to true if exists, false otherwise
+ */
+export async function fileDirExists(filePath: string): Promise<boolean> {
+  try {
+    await fsPromises.access(filePath);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -35,7 +51,9 @@ export async function testMemoryUsage<T>(
   };
 
   logger.debug(
-    `[Memory]${label}() start: startHeapUsed ${formatBytes(startMemoryUsage.heapUsed)}, startExternal ${formatBytes(startMemoryUsage.external)}`
+    `[Memory]${label}() start: startHeapUsed ${formatBytes(startMemoryUsage.heapUsed)}, startExternal ${formatBytes(
+      startMemoryUsage.external
+    )}`
   );
 
   const result = await fn();
@@ -47,7 +65,9 @@ export async function testMemoryUsage<T>(
   };
 
   logger.debug(
-    `[Memory]${label}() end: endHeapUsed ${formatBytes(endMemoryUsage.heapUsed)}, endExternal ${formatBytes(endMemoryUsage.external)}`
+    `[Memory]${label}() end: endHeapUsed ${formatBytes(endMemoryUsage.heapUsed)}, endExternal ${formatBytes(
+      endMemoryUsage.external
+    )}`
   );
 
   const realHeapUsed = endMemoryUsage.heapUsed - startMemoryUsage.heapUsed;
