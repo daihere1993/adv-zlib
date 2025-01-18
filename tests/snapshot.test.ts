@@ -11,4 +11,8 @@ test('vdu_snapshot.zip', async () => {
   const firstEntry = entries[0].name;
   const exists = await advZlib.exists(path.join(vduSnapshotPath, firstEntry, 'snapshot_file_list.txt'));
   expect(exists).toBeTruthy();
+
+  const target = path.join(vduSnapshotPath, firstEntry, 'RU_1.zip/BTS_DH214500033_RMOD_L_1_fault_history_log.txt.gz');
+  const exists2 = await advZlib.exists(target);
+  expect(exists2).toBeTruthy();
 });
