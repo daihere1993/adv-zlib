@@ -1,6 +1,6 @@
 {
   "name": "adv-zlib",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "Advanced zlib utilities",
   "type": "module",
   "main": "./dist/cjs/index.cjs",
