@@ -188,8 +188,8 @@ describe('Public APIs', () => {
       await expect(advZlib.exists('')).rejects.toThrow();
     });
 
-    it('Edge Case2: Should throw an error if the source ZIP file does not exist.', async () => {
-      await expect(advZlib.exists(path.join(ASSET_DIR, '/a/b.zip/c.txt'))).rejects.toThrow();
+    it('Edge Case2: Should return false if the source ZIP file does not exist.', async () => {
+      expect(await advZlib.exists(path.join(ASSET_DIR, '/a/b.zip/c.txt'))).toBeFalsy();
     });
   });
 

@@ -19,7 +19,7 @@ export async function ensureDirectoryExists(dirPath: string): Promise<void> {
  * @param filePath The path to the file
  * @returns A promise that resolves to true if exists, false otherwise
  */
-export async function fileDirExists(filePath: string): Promise<boolean> {
+export async function fileOrDirExists(filePath: string): Promise<boolean> {
   try {
     await fsPromises.access(filePath);
     return true;

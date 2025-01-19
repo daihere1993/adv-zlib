@@ -123,7 +123,6 @@ export class ZipEntry {
   private cachePath?: string;
   private decompressedData?: Buffer;
   private outerZipPath!: string;
-  private cacheDir = '/tmp/adv-zlib';
 
   public get isCached(): boolean {
     return !!this.cachePath || !!this.decompressedData;
@@ -203,27 +202,23 @@ export class ZipEntry {
     }
   }
 
-  public generateCacheFilePath() {
+  public generateCacheFilePath(cacheDir: string): string {
     // Combine size and CRC32 into a string
     const uniqueKey = `${this.size}:${this.lfh.crc32}`;
     // Hash the string to create a unique file name
     const hash = createHash('sha256').update(uniqueKey).digest('hex');
 
     // Return the full path to the cache file
-    return path.join(this.cacheDir, hash);
+    return path.join(cacheDir, hash);
   }
 
-  public async cacheData(maxCacheSize: number): Promise<Buffer | string | null> {
+  public async cacheData(maxCacheSize: number, cacheDir: string): Promise<Buffer | string | undefined> {
     if (!this.fileData) {
       await this.init();
     }
 
-    if (this.isCached) {
-      return this.getCachedData();
-    }
-
     if (this.size >= maxCacheSize) {
-      const cacheFile = this.generateCacheFilePath();
+      const cacheFile = this.generateCacheFilePath(cacheDir);
       if (fs.existsSync(cacheFile)) {
         return cacheFile;
       }
@@ -235,24 +230,29 @@ export class ZipEntry {
       try {
         await pipeline(readStream, writeStream);
         this.logger.info(`[AdvZlib.Entry] handleEntryData(): Cached large entry to ${cacheFile}`);
-        this.onCache(cacheFile);
+        this.cachePath = cacheFile;
         return cacheFile;
       } catch (err: any) {
         this.logger.error(`[AdvZlib.Entry] handleEntryData(): Failed to cache entry ${this.relPath}: ${err.message}`);
-        return null;
+        return undefined;
       }
     } else {
       try {
+        if (this.decompressedData) {
+          return this.decompressedData;
+        }
+
         const data = await this.read();
         if (data.length === 0) {
-          this.logger.warn(`[AdvZlib] handleEntryData(): Entry ${this.relPath} is empty.`);
-          return null;
+          this.logger.warn(`[AdvZlib.Entry] handleEntryData(): Entry ${this.relPath} is empty.`);
         }
-        this.onCache(data);
+
+        this.decompressedData = data;
+
         return data;
       } catch (err: any) {
-        this.logger.error(`[AdvZlib] handleEntryData(): Failed to read entry ${this.relPath}: ${err.message}`);
-        return null;
+        this.logger.error(`[AdvZlib.Entry] handleEntryData(): Failed to read entry ${this.relPath}: ${err.message}`);
+        return undefined;
       }
     }
   }
@@ -277,18 +277,6 @@ export class ZipEntry {
     this.logger.debug(`[AdvZlib.Entry] extract(): Extracted ${this.relPath} to ${dest}`);
 
     return dest;
-  }
-
-  public onCache(cache: Buffer | string) {
-    if (this.isCached) {
-      return;
-    }
-
-    if (Buffer.isBuffer(cache)) {
-      this.decompressedData = cache;
-    } else {
-      this.cachePath = cache;
-    }
   }
 
   private async checkIfDestIsDir(dest: string): Promise<boolean> {

@@ -1,12 +1,11 @@
 import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
 import path from 'node:path';
-import { pipeline } from 'node:stream/promises';
-// import findCacheDirectory from 'find-cache-dir';
+import findCacheDirectory from 'find-cache-dir';
 import { CentralDir, CentralDirOptions } from './central-dir.js';
 import { ZipEntry } from './entry.js';
 import { Logger } from './types.js';
-import { ensureDirectoryExists, fileDirExists } from './utils.js';
+import { fileOrDirExists } from './utils.js';
 
 export interface AdvZlibOptions {
   logger?: Logger;
@@ -27,8 +26,7 @@ export class AdvZlib {
     this.logger = opts?.logger || console;
     this.maxCacheSize = opts?.maxCacheSize || 50 * 1024 * 1024;
     this.maxCacheEntries = opts?.maxCacheEntries || 10;
-    this.cacheDir = opts?.cacheDir || '/tmp/adv-zlib';
-    // this.cacheDir = opts?.cacheDir || findCacheDirectory({ name: 'adv-zlib' })!;
+    this.cacheDir = opts?.cacheDir || findCacheDirectory({ name: 'adv-zlib' })!;
 
     if (!fs.existsSync(this.cacheDir)) {
       fs.mkdirSync(this.cacheDir, { recursive: true });
@@ -82,7 +80,7 @@ export class AdvZlib {
       return this.cachedExistenceInfos.get(src) ?? false;
     }
 
-    if (await fileDirExists(src)) {
+    if (await fileOrDirExists(src)) {
       return true;
     }
 
@@ -123,11 +121,11 @@ export class AdvZlib {
       throw new Error(`[AdvZlib] extract(): ZIP file ${src} does not exist.`);
     }
 
-    if (src.endsWith('.zip') && !(await fileDirExists(dest))) {
+    if (src.endsWith('.zip') && !(await fileOrDirExists(dest))) {
       throw new Error(`[AdvZlib] extract(): As ${src} is a zip file, ${dest} must be an existing directory.`);
     }
 
-    if (!src.endsWith('.zip') && !(await fileDirExists(path.dirname(dest)))) {
+    if (!src.endsWith('.zip') && !(await fileOrDirExists(path.dirname(dest)))) {
       throw new Error(`[AdvZlib] extract(): ${path.dirname(dest)} does not exist.`);
     }
 
@@ -200,64 +198,43 @@ export class AdvZlib {
    * - Nested zip: `/a/b.zip/c.zip` or `/a/b.zip/c/d.zip`
    * @returns A promise that resolves to the central directory
    */
-  private async getOrInitCentralDir(src: string): Promise<CentralDir | null> {
+  private async getOrInitCentralDir(src: string): Promise<CentralDir | undefined> {
     const cachedDir = this.getCentralDirFromCache(src);
     if (cachedDir) {
       this.logger.info(`[AdvZlib] getOrInitCentralDir(): Using cached central directory for ${src}`);
       return cachedDir;
     }
 
-    const zipPathSegs = this.splitZipPathIntoSegs(src).filter((seg) => seg.endsWith('.zip'));
+    const zipPathSegs = this.splitZipPathIntoSegs(src);
 
     if (zipPathSegs.length === 0) {
       this.logger.error(`[AdvZlib] getOrInitCentralDir(): No ZIP segments found in path: ${src}`);
-      return null;
+      return;
     }
 
     let accumulatedPath = '';
-    let centralDir: CentralDir | null = null;
+    let entry: ZipEntry | undefined = undefined;
+    let centralDir: CentralDir | undefined = undefined;
 
     for (const seg of zipPathSegs) {
       accumulatedPath = path.join(accumulatedPath, seg);
 
-      if (!centralDir) {
-        // Handle outermost ZIP file
-        const exists = await fileDirExists(accumulatedPath);
-        if (!exists) {
-          throw new Error(`[AdvZlib] getOrInitCentralDir(): ZIP file ${accumulatedPath} does not exist.`);
-        }
+      if (!accumulatedPath.endsWith('.zip')) continue;
 
-        if (this.cachedCentralDirs.has(accumulatedPath)) {
-          centralDir = this.getCentralDirFromCache(accumulatedPath);
-        } else {
-          centralDir = await this._getOrInitCentralDir(accumulatedPath);
-        }
-      } else {
-        // Handle nested ZIP entries
-        const entry = this.findZipEntry(centralDir, accumulatedPath);
-        if (!entry) return null;
+      if (!centralDir && !(await fileOrDirExists(accumulatedPath))) {
+        this.logger.warn(`[AdvZlib] getOrInitCentralDir(): ZIP file ${accumulatedPath} does not exist.`);
+        return;
+      }
 
-        if (entry.size === 0) {
+      if (centralDir) {
+        entry = this.findZipEntry(centralDir, accumulatedPath);
+        if (!entry || entry.size === 0) {
           this.logger.warn(`[AdvZlib] getOrInitCentralDir(): Entry ${seg} is empty in ${accumulatedPath}.`);
-          return null;
-        }
-
-        if (this.cachedCentralDirs.has(accumulatedPath)) {
-          centralDir = this.getCentralDirFromCache(accumulatedPath);
-        } else {
-          const entryData = await entry.cacheData(this.maxCacheSize);
-
-          if (Buffer.isBuffer(entryData)) {
-            centralDir = await this._getOrInitCentralDir(accumulatedPath, entryData);
-          } else if (typeof entryData === 'string') {
-            // Large file cached to disk, no need to proceed further
-            centralDir = await this._getOrInitCentralDir(accumulatedPath, entryData);
-          } else {
-            this.logger.warn(`[AdvZlib] getOrInitCentralDir(): Entry ${seg} is empty in ${accumulatedPath}.`);
-            return null;
-          }
+          return;
         }
       }
+
+      centralDir = await this._getOrInitCentralDir(accumulatedPath, entry);
     }
 
     return centralDir;
@@ -269,8 +246,18 @@ export class AdvZlib {
    * @param dataSource Optional buffer data for nested ZIPs
    * @returns A promise that resolves to the central directory
    */
-  private async _getOrInitCentralDir(src: string, dataSource?: Buffer | string): Promise<CentralDir> {
-    const opts: CentralDirOptions = { logger: this.logger, dataSource };
+  private async _getOrInitCentralDir(src: string, entry?: ZipEntry): Promise<CentralDir> {
+    if (this.cachedCentralDirs.has(src)) {
+      this.logger.debug(`[AdvZlib] _getOrInitCentralDir(): Using cached central directory for ${src}`);
+      return this.getCentralDirFromCache(src)!;
+    }
+
+    let entryData: Buffer | string | undefined = undefined;
+    if (entry) {
+      entryData = await entry.cacheData(this.maxCacheSize, this.cacheDir);
+    }
+
+    const opts: CentralDirOptions = { logger: this.logger, dataSource: entryData };
     const centralDir = new CentralDir(src, opts);
     await centralDir.init();
 
@@ -368,20 +355,20 @@ export class AdvZlib {
    * Find a ZIP entry within the central directory
    * @param centralDir The central directory to search
    * @param zipFilePath The current ZIP file path
-   * @returns The found entry or null
+   * @returns The found entry or undefined
    */
-  private findZipEntry(centralDir: CentralDir, zipFilePath: string): ZipEntry | null {
+  private findZipEntry(centralDir: CentralDir, zipFilePath: string): ZipEntry | undefined {
     const lastEntryRelPath = this.getLastEntryRelPath(zipFilePath, true);
     const entry = centralDir.entries.find((entry) => !entry.isDirectory && entry.relPath === lastEntryRelPath);
 
     if (!entry) {
       this.logger.error(`[AdvZlib] findZipEntry(): Entry ${lastEntryRelPath} does not exist in ${zipFilePath}.`);
-      return null;
+      return undefined;
     }
 
     if (entry.size === 0) {
       this.logger.warn(`[AdvZlib] findZipEntry(): Entry ${lastEntryRelPath} is empty in ${zipFilePath}.`);
-      return null;
+      return undefined;
     }
 
     return entry;
