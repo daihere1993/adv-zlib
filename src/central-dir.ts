@@ -129,6 +129,10 @@ export class CentralDir {
       offset += CentralDirFileHeader.MIN_SIZE + extraSize;
     }
 
+    if (!Buffer.isBuffer(fd)) {
+      await fd.close();
+    }
+
     return cdfhs;
   }
 

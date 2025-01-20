@@ -84,6 +84,7 @@ export class FileData {
     const buffer = Buffer.alloc(this.cdfh.compressedSize);
     const offset = this.cdfh.localFileHeaderOffset + this.lfh.totalSize;
     await fd.read(buffer, 0, this.cdfh.compressedSize, offset);
+    await fd.close();
 
     return buffer;
   }
@@ -152,6 +153,7 @@ export class ZipEntry {
     const buffer = Buffer.alloc(LocalFileHeader.MIN_SIZE);
     if (fd) {
       await fd.read(buffer, 0, LocalFileHeader.MIN_SIZE, offset);
+      await fd.close();
     } else {
       (this.dataSource as Buffer).copy(buffer, 0, offset, offset + LocalFileHeader.MIN_SIZE);
     }

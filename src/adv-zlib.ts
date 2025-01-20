@@ -324,14 +324,10 @@ export class AdvZlib {
    * @returns The last entry relative path
    */
   private getLastEntryRelPath(src: string, includeZip = false): string {
-    let lastEntryRelPath = this.splitZipPathIntoSegs(src).pop();
+    let lastEntryRelPath = this.splitZipPathIntoSegs(src).pop()?.replace(/^[/\\]+/, '');
 
     if (lastEntryRelPath?.endsWith('.zip')) {
       lastEntryRelPath = includeZip ? lastEntryRelPath : '';
-    }
-
-    if (lastEntryRelPath?.startsWith('/')) {
-      lastEntryRelPath = lastEntryRelPath.slice(1);
     }
 
     return lastEntryRelPath || '';
