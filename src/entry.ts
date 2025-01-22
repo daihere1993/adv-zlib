@@ -9,7 +9,7 @@ import { createHash } from 'crypto';
 
 import { CentralDirFileHeader } from './cdfh.js';
 import { Logger } from './types.js';
-import { ensureDirectoryExists } from './utils.js';
+import { ensureDirectoryExists, fileOrDirExists } from './utils.js';
 
 enum CompressionMethod {
   NONE = 0,
@@ -221,7 +221,7 @@ export class ZipEntry {
 
     if (this.size >= maxCacheSize) {
       const cacheFile = this.generateCacheFilePath(cacheDir);
-      if (fs.existsSync(cacheFile)) {
+      if (await fileOrDirExists(cacheFile)) {
         return cacheFile;
       }
 

@@ -1,16 +1,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { AdvZlib } from '../src/adv-zlib';
 import { ZipEntry } from '../src/entry';
 import { createZipFromStructure, DEFAULT_CONTENT } from './fixture';
 
-const BASE_DIR = path.join(__dirname, 'basic');
+const BASE_DIR = path.join(__dirname, 'ut_tmp_basic');
 const CACHE_DIR = path.join(BASE_DIR, 'cache');
 const ASSET_DIR = path.join(BASE_DIR, 'assets');
 
-const advZlib = new AdvZlib({ cacheDir: CACHE_DIR });
+let advZlib: AdvZlib;
 
 async function setup() {
   if (!fs.existsSync(ASSET_DIR)) {
@@ -19,8 +19,8 @@ async function setup() {
 }
 
 async function cleanup() {
-  await fs.promises.rm(BASE_DIR, { recursive: true, force: true });
   await advZlib.cleanup();
+  await fs.promises.rm(ASSET_DIR, { recursive: true, force: true });
 }
 
 function sortEntries(entries: ZipEntry[]) {
@@ -32,6 +32,14 @@ function sortFiles(files: string[]) {
 }
 
 describe('Public APIs', () => {
+  beforeAll(() => {
+    advZlib = new AdvZlib({ cacheDir: CACHE_DIR });
+  });
+
+  afterAll(async () => {
+    await fs.promises.rm(BASE_DIR, { recursive: true, force: true });
+  });
+
   describe('getEntries()', () => {
     beforeEach(async () => {
       await setup();

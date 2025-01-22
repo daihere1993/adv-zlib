@@ -86,11 +86,11 @@ export class CentralDir {
     const eocdSize = Math.min(stat.size, EndOfCentralDirRecord.MAX_SIZE);
     const eocdBuf = Buffer.alloc(eocdSize);
 
-    if (!Buffer.isBuffer(fd)) {
+    if (Buffer.isBuffer(fd)) {
+      fd.copy(eocdBuf, 0, stat.size - eocdSize, stat.size);
+    } else {
       await fd.read(eocdBuf, 0, eocdSize, stat.size - eocdSize);
       await fd.close();
-    } else {
-      fd.copy(eocdBuf, 0, stat.size - eocdSize, stat.size);
     }
 
     const signature = EndOfCentralDirRecord.SIGNATURE;

@@ -1,3 +1,4 @@
+
 # assets
 assets/
 
@@ -44,3 +45,6 @@ logs/
 
 # Yarn Integrity file
 .yarn-integrity
+
+# Temporary files
+ut_tmp_*

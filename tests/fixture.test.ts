@@ -1,14 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, test } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, test } from 'vitest';
 
 import { AdvZlib } from '../src/adv-zlib';
 import { createZipFromStructure, DEFAULT_CONTENT } from './fixture';
 
-const BASE_DIR = path.join(__dirname, 'fixture');
+let advZlib: AdvZlib;
+const BASE_DIR = path.join(__dirname, 'ut_tmp_fixture');
 const CACHE_DIR = path.join(BASE_DIR, 'cache');
 const ASSET_DIR = path.join(BASE_DIR, 'assets');
-const advZlib = new AdvZlib({ cacheDir: CACHE_DIR });
 
 async function setup() {
   if (!fs.existsSync(ASSET_DIR)) {
@@ -17,11 +17,19 @@ async function setup() {
 }
 
 async function cleanup() {
-  await fs.promises.rm(BASE_DIR, { recursive: true, force: true });
+  await fs.promises.rm(ASSET_DIR, { recursive: true, force: true });
   await advZlib.cleanup();
 }
 
 describe('Basics', () => {
+  beforeAll(() => {
+    advZlib = new AdvZlib({ cacheDir: CACHE_DIR });
+  });
+
+  afterAll(async () => {
+    await fs.promises.rm(BASE_DIR, { recursive: true, force: true });
+  });
+
   beforeEach(async () => {
     await setup();
   });

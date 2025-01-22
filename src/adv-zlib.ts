@@ -188,7 +188,8 @@ export class AdvZlib {
   public async cleanup() {
     this.cachedCentralDirs.clear();
     this.cachedExistenceInfos.clear();
-    await fsPromises.rm(this.cacheDir, { recursive: true, force: true });
+    const files = await fsPromises.readdir(this.cacheDir);
+    await Promise.all(files.map((file) => fsPromises.rm(path.join(this.cacheDir, file))));
   }
 
   /**

@@ -1,9 +1,12 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { expect, test, describe, afterEach } from 'vitest';
 import { AdvZlib } from '../src/adv-zlib';
 
-describe('vdu_snapshot.zip', async () => {
-  const vduSnapshotPath = path.join(process.cwd(), 'assets', 'vdu_snapshot.zip');
+const vduSnapshotPath = path.join(process.cwd(), 'assets', 'vdu_snapshot.zip');
+const ifExists = await fs.promises.access(vduSnapshotPath).then(() => true).catch(() => false);
+
+describe.runIf(ifExists)('vdu_snapshot.zip', async () => {
   const advZlib = new AdvZlib();
   const snapshotName = 'Snapshot_MRBTS-11162_5gvDU_TL171_vDUCNF25R1_0.300.25526_20240920-fault4261.zip';
 
