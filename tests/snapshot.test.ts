@@ -1,14 +1,24 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { expect, test, describe, afterEach } from 'vitest';
+import { expect, test, describe, afterEach, beforeAll, afterAll } from 'vitest';
 import { AdvZlib } from '../src/adv-zlib';
 
 const vduSnapshotPath = path.join(process.cwd(), 'assets', 'vdu_snapshot.zip');
+const BASE_DIR = path.join(__dirname, 'ut_tmp_snapshot');
+const BASE_CACHE_DIR = path.join(BASE_DIR, 'cache');
 const ifExists = await fs.promises.access(vduSnapshotPath).then(() => true).catch(() => false);
 
 describe.runIf(ifExists)('vdu_snapshot.zip', async () => {
-  const advZlib = new AdvZlib();
+  let advZlib: AdvZlib;
   const snapshotName = 'Snapshot_MRBTS-11162_5gvDU_TL171_vDUCNF25R1_0.300.25526_20240920-fault4261.zip';
+
+  beforeAll(() => {
+    advZlib = new AdvZlib({ cacheBaseDir: BASE_CACHE_DIR });
+  });
+
+  afterAll(async () => {
+    await fs.promises.rm(BASE_DIR, { recursive: true });
+  });
 
   afterEach(async () => {
     await advZlib.cleanup();

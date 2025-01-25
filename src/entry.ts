@@ -214,12 +214,12 @@ export class ZipEntry {
     return path.join(cacheDir, hash);
   }
 
-  public async cacheData(maxCacheSize: number, cacheDir: string): Promise<Buffer | string | undefined> {
+  public async cacheData(consistentEntryThreshold: number, cacheDir: string): Promise<Buffer | string | undefined> {
     if (!this.fileData) {
       await this.init();
     }
 
-    if (this.size >= maxCacheSize) {
+    if (this.size >= consistentEntryThreshold) {
       const cacheFile = this.generateCacheFilePath(cacheDir);
       if (await fileOrDirExists(cacheFile)) {
         return cacheFile;

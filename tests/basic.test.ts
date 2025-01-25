@@ -33,7 +33,7 @@ function sortFiles(files: string[]) {
 
 describe('Public APIs', () => {
   beforeAll(() => {
-    advZlib = new AdvZlib({ cacheDir: CACHE_DIR });
+    advZlib = new AdvZlib({ cacheBaseDir: CACHE_DIR });
   });
 
   afterAll(async () => {

@@ -7,29 +7,41 @@ import { ZipEntry } from './entry.js';
 import { Logger } from './types.js';
 import { fileOrDirExists } from './utils.js';
 
+const DEFAULT_MAX_CENTRAL_DIR_COUNT = 10;
+const DEFAULT_CONSISTENT_ENTRY_THRESHOLD = 50 * 1024 * 1024;
+
 export interface AdvZlibOptions {
   logger?: Logger;
-  cacheDir?: string;
+  cacheBaseDir?: string;
   maxCacheSize?: number;
-  maxCacheEntries?: number;
+  maxCentralDirCount?: number;
+  consistentEntryThreshold?: number;
+}
+
+interface CacheInfos {
+  cacheDir: string;
+  maxCentralDirCount: number;
+  consistentEntryThreshold: number;
+  cachedCentralDirs: Map<string, CentralDir>;
+  cachedExistenceInfos: Map<string, boolean>;
 }
 
 export class AdvZlib {
   private logger!: Logger;
-  private maxCacheSize!: number;
-  private maxCacheEntries!: number;
-  private cacheDir!: string;
-  private cachedCentralDirs = new Map<string, CentralDir>();
-  private cachedExistenceInfos = new Map<string, boolean>();
+  private cacheInfos!: CacheInfos;
 
   constructor(opts?: AdvZlibOptions) {
     this.logger = opts?.logger || console;
-    this.maxCacheSize = opts?.maxCacheSize || 50 * 1024 * 1024;
-    this.maxCacheEntries = opts?.maxCacheEntries || 10;
-    this.cacheDir = opts?.cacheDir || findCacheDirectory({ name: 'adv-zlib' })!;
+    this.cacheInfos = {
+      cacheDir: opts?.cacheBaseDir ? path.join(opts.cacheBaseDir, 'adv-zlib') : findCacheDirectory({ name: 'adv-zlib' })!,
+      maxCentralDirCount: opts?.maxCentralDirCount || DEFAULT_MAX_CENTRAL_DIR_COUNT,
+      consistentEntryThreshold: opts?.consistentEntryThreshold || DEFAULT_CONSISTENT_ENTRY_THRESHOLD,
+      cachedCentralDirs: new Map<string, CentralDir>(),
+      cachedExistenceInfos: new Map<string, boolean>(),
+    };
 
-    if (!fs.existsSync(this.cacheDir)) {
-      fs.mkdirSync(this.cacheDir, { recursive: true });
+    if (!fs.existsSync(this.cacheInfos.cacheDir)) {
+      fs.mkdirSync(this.cacheInfos.cacheDir, { recursive: true });
     }
   }
 
@@ -76,8 +88,8 @@ export class AdvZlib {
       throw new Error(`[AdvZlib] exists(): ${src} is empty`);
     }
 
-    if (this.cachedExistenceInfos.has(src)) {
-      return this.cachedExistenceInfos.get(src) ?? false;
+    if (this.cacheInfos.cachedExistenceInfos.has(src)) {
+      return this.cacheInfos.cachedExistenceInfos.get(src) ?? false;
     }
 
     if (await fileOrDirExists(src)) {
@@ -96,7 +108,7 @@ export class AdvZlib {
 
     const entry = centralDir.entries.find((entry) => this.matchEntryByFullPath(entry, src));
     const exsistence = !!entry;
-    this.cachedExistenceInfos.set(src, exsistence);
+    this.cacheInfos.cachedExistenceInfos.set(src, exsistence);
 
     return exsistence;
   }
@@ -186,10 +198,11 @@ export class AdvZlib {
   }
 
   public async cleanup() {
-    this.cachedCentralDirs.clear();
-    this.cachedExistenceInfos.clear();
-    const files = await fsPromises.readdir(this.cacheDir);
-    await Promise.all(files.map((file) => fsPromises.rm(path.join(this.cacheDir, file))));
+    this.cacheInfos.cachedCentralDirs.clear();
+    this.cacheInfos.cachedExistenceInfos.clear();
+    if (await fileOrDirExists(this.cacheInfos.cacheDir)) {
+      await fs.promises.rm(this.cacheInfos.cacheDir, { recursive: true });
+    }
   }
 
   /**
@@ -248,30 +261,30 @@ export class AdvZlib {
    * @returns A promise that resolves to the central directory
    */
   private async _getOrInitCentralDir(src: string, entry?: ZipEntry): Promise<CentralDir> {
-    if (this.cachedCentralDirs.has(src)) {
+    if (this.cacheInfos.cachedCentralDirs.has(src)) {
       this.logger.debug(`[AdvZlib] _getOrInitCentralDir(): Using cached central directory for ${src}`);
       return this.getCentralDirFromCache(src)!;
     }
 
     let entryData: Buffer | string | undefined = undefined;
     if (entry) {
-      entryData = await entry.cacheData(this.maxCacheSize, this.cacheDir);
+      entryData = await entry.cacheData(this.cacheInfos.consistentEntryThreshold, this.cacheInfos.cacheDir);
     }
 
     const opts: CentralDirOptions = { logger: this.logger, dataSource: entryData };
     const centralDir = new CentralDir(src, opts);
     await centralDir.init();
 
-    if (this.cachedCentralDirs.size < this.maxCacheEntries) {
-      this.cachedCentralDirs.set(src, centralDir);
+    if (this.cacheInfos.cachedCentralDirs.size < this.cacheInfos.maxCentralDirCount) {
+      this.cacheInfos.cachedCentralDirs.set(src, centralDir);
     } else {
       // Remove the oldest one
-      const oldest = this.cachedCentralDirs.keys().next().value;
+      const oldest = this.cacheInfos.cachedCentralDirs.keys().next().value;
       if (oldest) {
-        this.cachedCentralDirs.delete(oldest);
+        this.cacheInfos.cachedCentralDirs.delete(oldest);
       }
       // Append the new one
-      this.cachedCentralDirs.set(src, centralDir);
+      this.cacheInfos.cachedCentralDirs.set(src, centralDir);
     }
 
     return centralDir;
@@ -325,7 +338,9 @@ export class AdvZlib {
    * @returns The last entry relative path
    */
   private getLastEntryRelPath(src: string, includeZip = false): string {
-    let lastEntryRelPath = this.splitZipPathIntoSegs(src).pop()?.replace(/^[/\\]+/, '');
+    let lastEntryRelPath = this.splitZipPathIntoSegs(src)
+      .pop()
+      ?.replace(/^[/\\]+/, '');
 
     if (lastEntryRelPath?.endsWith('.zip')) {
       lastEntryRelPath = includeZip ? lastEntryRelPath : '';
@@ -381,7 +396,7 @@ export class AdvZlib {
 
   private getCentralDirFromCache(src: string): CentralDir | null {
     const deepestZipPath = this.getDeepestZipPath(src);
-    const cachedDir = this.cachedCentralDirs.get(deepestZipPath);
+    const cachedDir = this.cacheInfos.cachedCentralDirs.get(deepestZipPath);
     if (cachedDir) {
       this.logger.info(`[AdvZlib] _getOrInitCentralDir(): Using cached central directory for ${deepestZipPath}`);
       return cachedDir;

@@ -35,10 +35,10 @@ describe('Performance', () => {
   describe('Single Operation Performance', () => {
     describe.each(performanceTestCases)('$label', ({ src, getEntriesPath, readFilePath, expectations }) => {
       const isValid = validateTestData([src]);
-      const cacheDir = path.join(BASE_CACHE_DIR, `1_${path.basename(src)}`);
+      const cacheBaseDir = path.join(BASE_CACHE_DIR, `1_${path.basename(src)}`);
 
       beforeAll(async () => {
-        advZlib = new AdvZlib({ cacheDir });
+        advZlib = new AdvZlib({ cacheBaseDir });
       });
 
       afterEach(async () => {
@@ -90,10 +90,10 @@ describe('Performance', () => {
       const isValid = validateTestData([src]);
 
       describe.runIf(isValid)('Memory Usage', async () => {
-        const cacheDir = path.join(BASE_CACHE_DIR, `2_${path.basename(src)}`);
+        const cacheBaseDir = path.join(BASE_CACHE_DIR, `2_${path.basename(src)}`);
 
         beforeAll(async () => {
-          advZlib = new AdvZlib({ cacheDir });
+          advZlib = new AdvZlib({ cacheBaseDir });
         });
 
         afterEach(async () => {
@@ -133,10 +133,10 @@ describe('Performance', () => {
       });
 
       describe.runIf(isValid)('Memory Leaks', async () => {
-        const cacheDir = path.join(BASE_CACHE_DIR, `3_${path.basename(src)}`);
+        const cacheBaseDir = path.join(BASE_CACHE_DIR, `3_${path.basename(src)}`);
 
         beforeAll(async () => {
-          advZlib = new AdvZlib({ cacheDir });
+          advZlib = new AdvZlib({ cacheBaseDir });
         });
 
         afterEach(async () => {
