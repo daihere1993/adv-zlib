@@ -1,5 +1,4 @@
 import fs from 'node:fs';
-import fsPromises from 'node:fs/promises';
 import path from 'node:path';
 import findCacheDirectory from 'find-cache-dir';
 import { CentralDir, CentralDirOptions } from './central-dir.js';
