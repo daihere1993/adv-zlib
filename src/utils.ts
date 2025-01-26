@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { promises as fsPromises } from 'node:fs';
 import { Logger, MemoryUsage } from './types.js';
 
@@ -74,4 +76,38 @@ export async function testMemoryUsage<T>(
   if (expectFn) expectFn({ heapUsed: realHeapUsed, external: realExternal });
 
   return result;
+}
+
+/**
+ * Find or create a cache directory under node_modules/.cache
+ * @param options.name The name of the cache directory
+ * @returns The absolute path to the cache directory
+ */
+export function findCacheDirectory(options: { name: string }): string {
+  const { name } = options;
+  
+  // Start from the current directory and look up for node_modules
+  let currentDir = process.cwd();
+  let prevDir = '';
+  
+  while (currentDir !== prevDir) {
+    const nodeModulesDir = path.join(currentDir, 'node_modules');
+    if (fs.existsSync(nodeModulesDir)) {
+      const cacheDir = path.join(nodeModulesDir, '.cache', name);
+      
+      // Create cache directory if it doesn't exist
+      fs.mkdirSync(cacheDir, { recursive: true });
+      
+      return cacheDir;
+    }
+    
+    prevDir = currentDir;
+    currentDir = path.dirname(currentDir);
+  }
+  
+  // Fallback to OS temp directory if no node_modules found
+  const tempDir = path.join(process.env.TMPDIR || '/tmp', name);
+  fs.mkdirSync(tempDir, { recursive: true });
+  
+  return tempDir;
 }

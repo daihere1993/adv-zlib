@@ -1,10 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import findCacheDirectory from 'find-cache-dir';
 import { CentralDir, CentralDirOptions } from './central-dir.js';
 import { ZipEntry } from './entry.js';
 import { Logger } from './types.js';
-import { fileOrDirExists } from './utils.js';
+import { fileOrDirExists, findCacheDirectory } from './utils.js';
 
 const DEFAULT_MAX_CENTRAL_DIR_COUNT = 10;
 const DEFAULT_CONSISTENT_ENTRY_THRESHOLD = 50 * 1024 * 1024;
@@ -32,7 +31,7 @@ export class AdvZlib {
   constructor(opts?: AdvZlibOptions) {
     this.logger = opts?.logger || console;
     this.cacheInfos = {
-      cacheDir: opts?.cacheBaseDir ? path.join(opts.cacheBaseDir, 'adv-zlib') : findCacheDirectory({ name: 'adv-zlib' })!,
+      cacheDir: opts?.cacheBaseDir ? path.join(opts.cacheBaseDir, 'adv-zlib') : findCacheDirectory({ name: 'adv-zlib' }),
       maxCentralDirCount: opts?.maxCentralDirCount || DEFAULT_MAX_CENTRAL_DIR_COUNT,
       consistentEntryThreshold: opts?.consistentEntryThreshold || DEFAULT_CONSISTENT_ENTRY_THRESHOLD,
       cachedCentralDirs: new Map<string, CentralDir>(),
