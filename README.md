@@ -8,11 +8,11 @@ The go-to package for working with large ZIP files—fast, efficient, and effort
 
 <div align="center">
   <a href="https://www.npmjs.com/package/adv-zlib"><img src="https://img.shields.io/npm/v/adv-zlib"></a>
+  <a href="https://app.codecov.io/gh/daihere1993/adv-zlib/tree/main/projects">
+    <img src="https://codecov.io/gh/daihere1993/adv-zlib/branch/main/graphs/badge.svg" alt="Coverage Status" />
+  </a>
   <a href="https://github.com/daihere1993/adv-zlib/actions/workflows/ci.yml"><img src="https://github.com/daihere1993/adv-zlib/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
-  <a href="https://coveralls.io/github/daihere1993/adv-zlib?branch=main">
-    <img src="https://coveralls.io/repos/github/daihere1993/adv-zlib/badge.svg?branch=main" alt="Coverage Status" />
-  </a>
 </div>
 
 ## Features
