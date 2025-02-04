@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { AdvZlib } from '../src/adv-zlib';
 import { ZipEntry } from '../src/entry';
 import { createZipFromStructure, DEFAULT_CONTENT } from './fixture';
+import { createPermanentAssets, assetsFiles } from './setup';
 
 const BASE_DIR = path.join(__dirname, 'ut_tmp_basic');
 const CACHE_DIR = path.join(BASE_DIR, 'cache');
@@ -32,9 +33,10 @@ function sortFiles(files: string[]) {
 }
 
 describe('Public APIs', () => {
-  beforeAll(() => {
+  beforeAll(async () => {
     advZlib = new AdvZlib({ cacheBaseDir: CACHE_DIR });
-  });
+    await createPermanentAssets();
+  }, 30 * 60 * 1000);
 
   afterAll(async () => {
     await fs.promises.rm(BASE_DIR, { recursive: true, force: true });
@@ -105,6 +107,11 @@ describe('Public APIs', () => {
       expect(entries[1].name).toBe('d.txt');
       expect(entries[1].relPath).toBe('d.txt');
       expect(entries[1].fullPath).toBe(path.join(ASSET_DIR, '/a.zip/b.zip/d.txt'));
+    });
+
+    it('Normal Case4: should return all of entries of a zip64 file', async () => {
+      const entries = await advZlib.getEntries(assetsFiles.zip64);
+      expect(entries.length).toBe(65536);
     });
 
     it('Edge Case1: Should return an empty array if no entries match the filter callback', async () => {
@@ -190,6 +197,10 @@ describe('Public APIs', () => {
       `;
       await createZipFromStructure(ASSET_DIR, structure);
       expect(await advZlib.exists(path.join(ASSET_DIR, '/a.zip/b.zip'))).toBeTruthy();
+    });
+
+    it('Normal Case4: should return true of a zip64 file', async () => {
+      expect(await advZlib.exists(path.join(assetsFiles.zip64, 'foo.txt'))).toBeTruthy();
     });
 
     it('Edge Case1: Should throw an error if the source is empty.', async () => {
@@ -313,6 +324,16 @@ describe('Public APIs', () => {
       expect(files[0]).toBe(extractFilePath);
       expect(fs.existsSync(extractFilePath)).toBeTruthy();
       expect(fs.readFileSync(extractFilePath).toString()).toBe(DEFAULT_CONTENT);
+    });
+
+    it('Normal Case6: extract a file under a zip64 file', async () => {
+      const extractDir = path.join(ASSET_DIR, '/extract');
+      const extractFilePath = path.join(ASSET_DIR, '/extract/foo.txt');
+      fs.mkdirSync(extractDir, { recursive: true });
+
+      expect(await advZlib.extract(path.join(assetsFiles.zip64, 'foo.txt'), extractFilePath)).toEqual([extractFilePath]);
+      expect(fs.existsSync(extractFilePath)).toBeTruthy();
+      expect(fs.readFileSync(extractFilePath).toString()).not.toBe('');
     });
 
     it('Edge Case1: Should throw an error if the source does not exist.', async () => {

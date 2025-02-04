@@ -1,9 +1,8 @@
-import assert from 'node:assert';
 import fs from 'node:fs';
 import { FileHandle } from 'node:fs/promises';
 import { CentralDirFileHeader } from './cdfh.js';
 import { ZipEntry } from './entry.js';
-import { EndOfCentralDirRecord } from './eocd.js';
+import { BaseEndOfCentralDirRecord, EndOfCentralDirRecord, Zip64EndOfCentralDirRecord } from './eocd.js';
 import { Logger } from './types.js';
 import { testMemoryUsage } from './utils.js';
 
@@ -39,8 +38,13 @@ export class CentralDir {
   }
 
   public async init() {
+    const fd = Buffer.isBuffer(this.dataSource) ? this.dataSource : await fs.promises.open(this.dataSource, 'r');
+
     const start = Date.now();
-    const eocd = new EndOfCentralDirRecord(await this.extractEOCDBuffer());
+    const eocd = await this.getEOCD(fd);
+
+    if (!eocd) throw new Error('[AdvZlib.CentralDir] init(): No EOCD record found');
+
     const end = Date.now();
     this.logger.info(`[AdvZlib.CentralDir] init(): Init EOCD in ${end - start}ms`);
 
@@ -53,7 +57,7 @@ export class CentralDir {
       this.logger
     );
     const end2 = Date.now();
-    this.logger.info(`[AdvZlib.CentralDir] init(): Init CDFHs in ${end2 - start2}ms`);
+    this.logger.info(`[AdvZlib.CentralDir] init(): Init ${cdfhs.length} CDFHs in ${end2 - start2}ms`);
 
     const start3 = Date.now();
     this.entries = await testMemoryUsage(
@@ -65,49 +69,40 @@ export class CentralDir {
     );
     const end3 = Date.now();
     this.logger.info(`[AdvZlib.CentralDir] init(): Init entries in ${end3 - start3}ms`);
-  }
 
-  /**
-   * Extracts the EndOfCentralDirRecord from the given data source.
-   *
-   * If the data source is a file, it reads the last 22 bytes of the file (the minimum size of EOCD).
-   * If the data source is a buffer, it copies the last 22 bytes of the buffer (the minimum size of EOCD).
-   * Then it searches for the EOCD signature from the end of the buffer.
-   * If the signature is found, it returns the buffer from the signature index to the end.
-   * If the signature is not found, it throws an error.
-   *
-   * @returns A promise that resolves to the EndOfCentralDirRecord buffer
-   */
-  private async extractEOCDBuffer(): Promise<Buffer> {
-    const fd = Buffer.isBuffer(this.dataSource) ? this.dataSource : await fs.promises.open(this.dataSource, 'r');
-
-    const stat = Buffer.isBuffer(fd) ? { size: fd.length } : await fd.stat();
-
-    const eocdSize = Math.min(stat.size, EndOfCentralDirRecord.MAX_SIZE);
-    const eocdBuf = Buffer.alloc(eocdSize);
-
-    if (Buffer.isBuffer(fd)) {
-      fd.copy(eocdBuf, 0, stat.size - eocdSize, stat.size);
-    } else {
-      await fd.read(eocdBuf, 0, eocdSize, stat.size - eocdSize);
+    if (!Buffer.isBuffer(fd)) {
       await fd.close();
     }
+  }
 
-    const signature = EndOfCentralDirRecord.SIGNATURE;
-    let signatureIndex = -1;
+  // Need to consider zip64 EOCD
+  private async getEOCD(fd: Buffer | FileHandle): Promise<BaseEndOfCentralDirRecord | undefined> {
+    const zip64EocdlSize = 20;
+    const totalSize = Buffer.isBuffer(fd) ? fd.length : (await fd.stat()).size;
+    const maxEOCDSize = EndOfCentralDirRecord.MIN_SIZE + EndOfCentralDirRecord.MAX_COMMENT_SIZE + zip64EocdlSize;
+    const eocdSize = Math.min(totalSize, maxEOCDSize);
+    const eocdMaxBuf = Buffer.alloc(eocdSize);
+
+    await this.read(fd, eocdMaxBuf, totalSize - eocdSize, eocdSize);
 
     for (let i = eocdSize - 4; i >= 0; i--) {
-      if (eocdBuf.readUInt32LE(i) === signature) {
-        signatureIndex = i;
-        break;
+      if (eocdMaxBuf.readUInt32LE(i) !== EndOfCentralDirRecord.SIGNATURE) continue;
+
+      const eocdrOffset = i;
+      const eocdBuf = eocdMaxBuf.subarray(eocdrOffset);
+      let eocd = new EndOfCentralDirRecord(eocdBuf);
+      if (eocd.centralDirOffset === 0xffffffff) {
+        const eocdlOffset = eocdrOffset - zip64EocdlSize;
+        if (eocdlOffset < 0) throw new Error('Invalid EOCD location offset');
+
+        const zip64EocdOffset = eocdMaxBuf.readUInt32LE(eocdlOffset + 8);
+        const zip64EocdBuf = Buffer.alloc(Zip64EndOfCentralDirRecord.SIZE);
+        await this.read(fd, zip64EocdBuf, zip64EocdOffset, Zip64EndOfCentralDirRecord.SIZE);
+        eocd = new Zip64EndOfCentralDirRecord(zip64EocdBuf);
       }
-    }
 
-    if (signatureIndex === -1) {
-      throw new Error(`[AdvZlib.CentralDir] extractEOCDBuffer(): EOCD signature not found in ${this.src}`);
+      return eocd;
     }
-
-    return eocdBuf.subarray(signatureIndex);
   }
 
   private async initCDFHs(eocd: EndOfCentralDirRecord): Promise<CentralDirFileHeader[]> {
@@ -121,7 +116,7 @@ export class CentralDir {
 
     while (offset < eocd.centralDirOffset + eocd.centralDirSize) {
       // Read the minimal fixed-size part of the header
-      await this.read(fd, shardBuffer, 0, shardSize, offset);
+      await this.read(fd, shardBuffer, offset, shardSize);
       const cdfh = new CentralDirFileHeader(shardBuffer);
       const extraSize = cdfh.fileNameLength + cdfh.extraFieldLength + cdfh.fileCommentLength;
 
@@ -129,18 +124,14 @@ export class CentralDir {
       offset += CentralDirFileHeader.MIN_SIZE + extraSize;
     }
 
-    if (!Buffer.isBuffer(fd)) {
-      await fd.close();
-    }
-
     return cdfhs;
   }
 
-  private async read(fd: Buffer | FileHandle, buffer: Buffer, offset: number, length: number, position: number) {
+  private async read(fd: Buffer | FileHandle, buffer: Buffer, offset: number, length: number) {
     if (Buffer.isBuffer(fd)) {
-      fd.copy(buffer, offset, position, position + length);
+      fd.copy(buffer, 0, offset, offset + length);
     } else {
-      await fd.read(buffer, offset, length, position);
+      await fd.read(buffer, 0, length, offset);
     }
   }
 
