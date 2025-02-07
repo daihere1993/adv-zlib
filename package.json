@@ -1,7 +1,7 @@
 {
   "name": "adv-zlib",
   "version": "0.2.0",
-  "description": "The go-to package for working with large ZIP files—fast, efficient, and effortlessly handles nested archives.",
+  "description": "The go-to package for working with large and nested ZIP files — fast, efficient, and effortlessly.",
   "type": "module",
   "main": "./dist/cjs/index.cjs",
   "module": "./dist/esm/index.js",
