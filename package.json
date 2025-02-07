@@ -24,12 +24,6 @@
     "coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit"
   },
-  "keywords": [
-    "zlib",
-    "compression"
-  ],
-  "author": "",
-  "license": "MIT",
   "devDependencies": {
     "@types/archiver": "^6.0.3",
     "@types/node": "^20.17.12",
@@ -40,5 +34,22 @@
   },
   "engines": {
     "node": ">=16"
-  }
+  },
+  "author": "daihere1993",
+  "homepage": "https://github.com/daihere1993/adv-zlib",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/daihere1993/adv-zlib"
+  },
+  "bugs": {
+    "url": "https://github.com/daihere1993/adv-zlib/issues"
+  },
+  "keywords": [
+    "unzip",
+    "zlib",
+    "zip",
+    "stream",
+    "decompression"
+  ],
+  "license": "MIT"
 }
