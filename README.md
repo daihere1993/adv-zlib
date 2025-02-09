@@ -60,7 +60,7 @@ if (await advZlib.exists(path.join(zipFilePath, targetFile))) {
 #### 💡 Why use adv-zlib?
 Unlike traditional extraction methods, adv-zlib reads only the required file, significantly improving performance by avoiding full decompression.
 
-### Handling Nested ZIP Files with a Clean and efficient API
+### Example 2:Handling Nested ZIP Files with a Clean and efficient API
 
 ```typescript
 import AdvZlib from 'adv-zlib';
