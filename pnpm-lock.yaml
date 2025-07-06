@@ -17,6 +17,9 @@ importers:
       '@vitest/coverage-v8':
         specifier: ^3.0.4
         version: 3.0.4(vitest@3.0.4(@types/node@20.17.12))
+      adv-zlib:
+        specifier: v0.2.3
+        version: 0.2.3
       archiver:
         specifier: ^7.0.1
         version: 7.0.1
@@ -370,6 +373,10 @@ packages:
   abort-controller@3.0.0:
     resolution: {integrity: sha512-h8lQ8tacZYnR3vNQTgibj+tODHI5/+l06Au2Pcriv/Gmet0eaj4TwWH41sO9wnHDiQsEj19q0drzdWdeAHtweg==}
     engines: {node: '>=6.5'}
+
+  adv-zlib@0.2.3:
+    resolution: {integrity: sha512-aZ/7cejC0K2b1Yi/Bymo5QkZX10+PQhi1/pYYxAXSu8YwzO/LYFD3ZGW/K1OeU4ptAHHTMl0lsWKfAqz6YYWFQ==}
+    engines: {node: '>=16'}
 
   ansi-regex@5.0.1:
     resolution: {integrity: sha512-quJQXlTSUGL2LH9SUXo8VwsY4soanhgo6LNSm84E1LBcE8s3O0wpdiRzyR9z/ZZJMlMWv37qOOb9pdJlMUEKFQ==}
@@ -1114,6 +1121,8 @@ snapshots:
   abort-controller@3.0.0:
     dependencies:
       event-target-shim: 5.0.1
+
+  adv-zlib@0.2.3: {}
 
   ansi-regex@5.0.1: {}
 
