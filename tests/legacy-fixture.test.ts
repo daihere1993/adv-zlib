@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, test } from 'vitest';
 
-import { AdvZlib } from '../src/adv-zlib';
+import AdvZlib from '../src/index';
 import { createZipFromStructure, DEFAULT_CONTENT } from './fixture';
 
 let advZlib: AdvZlib;

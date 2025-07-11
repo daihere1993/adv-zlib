@@ -1,8 +1,8 @@
 /**
- * Performance Comparison Tests for RefactoredAdvZlib
+ * Performance Comparison Tests for AdvZlib
  *
  * This test suite compares the performance of the legacy AdvZlib implementation
- * with the new RefactoredAdvZlib that includes DecompressedContentCache.
+ * with the new AdvZlib that includes DecompressedContentCache.
  *
  * Environment Variables:
  * - TEST_LARGE_ZIP_SIZE_MB: Size in MB for the large nested ZIP test (default: 2048 = 2GB)
@@ -19,14 +19,14 @@ import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'vitest'
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { performance } from 'perf_hooks';
-import { RefactoredAdvZlib } from '../../src/refactor/adv-zlib';
-import AdvZlib from 'adv-zlib';
+import AdvZlib from '../src/index';
+import AdvZlibLegacy from '../node_modules/adv-zlib';
 import {
   createBasicTestZipFiles,
   createPerformanceTestZipFiles,
   BasicTestAssets,
   PerformanceTestAssets,
-} from './utils/test-assets';
+} from './test-assets';
 
 interface PerformanceResult {
   operation: string;
@@ -37,9 +37,9 @@ interface PerformanceResult {
 }
 
 describe('📈 Performance Comparison Tests', () => {
-  const testAssetsDir = join(__dirname, 'test-assets');
-  let legacyAdvZlib: InstanceType<typeof AdvZlib>;
-  let refactoredAdvZlib: RefactoredAdvZlib;
+  const testAssetsDir = join(__dirname, 'test-assets-02-performance');
+  let legacyAdvZlib: AdvZlibLegacy;
+  let refactoredAdvZlib: AdvZlib;
   let basicAssets: BasicTestAssets; // Used sparingly for specific test scenarios
   let performanceAssets: PerformanceTestAssets; // Primary assets for performance testing
   const performanceResults: PerformanceResult[] = [];
@@ -69,8 +69,8 @@ describe('📈 Performance Comparison Tests', () => {
     ]);
 
     // Initialize implementations
-    legacyAdvZlib = new AdvZlib({ cacheBaseDir: testAssetsDir });
-    refactoredAdvZlib = new RefactoredAdvZlib({
+    legacyAdvZlib = new AdvZlibLegacy({ cacheBaseDir: testAssetsDir });
+    refactoredAdvZlib = new AdvZlib({
       logger: silentLogger,
       enableContentCaching: true,
       maxCentralDirCount: 20,
@@ -78,6 +78,7 @@ describe('📈 Performance Comparison Tests', () => {
       maxContentCacheCount: 200,
       maxContentCacheMemoryMB: 50,
       maxContentCacheFileSizeMB: 10, // 10MB threshold for disk caching
+      cacheBaseDir: testAssetsDir,
     });
   }, 300000); // Increased timeout to 5 minutes for large ZIP creation
 
@@ -146,8 +147,8 @@ describe('📈 Performance Comparison Tests', () => {
   describe('Cold Start Performance (No Cache)', () => {
     test('🚀 First-time ZIP access performance', async () => {
       // Use fresh instances to ensure no cache
-      const freshLegacy = new AdvZlib({ cacheBaseDir: testAssetsDir });
-      const freshRefactored = new RefactoredAdvZlib({ logger: silentLogger });
+      const freshLegacy = new AdvZlibLegacy({ cacheBaseDir: testAssetsDir });
+      const freshRefactored = new AdvZlib({ logger: silentLogger });
 
       try {
         const { result } = await measurePerformance(
@@ -172,8 +173,8 @@ describe('📈 Performance Comparison Tests', () => {
     });
 
     test('🚀 Complex compression access', async () => {
-      const freshLegacy = new AdvZlib({ cacheBaseDir: testAssetsDir });
-      const freshRefactored = new RefactoredAdvZlib({ logger: silentLogger });
+      const freshLegacy = new AdvZlibLegacy({ cacheBaseDir: testAssetsDir });
+      const freshRefactored = new AdvZlib({ logger: silentLogger });
 
       try {
         const { result } = await measurePerformance(
@@ -195,8 +196,8 @@ describe('📈 Performance Comparison Tests', () => {
     });
 
     test('🚀 Many entries first access', async () => {
-      const freshLegacy = new AdvZlib({ cacheBaseDir: testAssetsDir });
-      const freshRefactored = new RefactoredAdvZlib({ logger: silentLogger });
+      const freshLegacy = new AdvZlibLegacy({ cacheBaseDir: testAssetsDir });
+      const freshRefactored = new AdvZlib({ logger: silentLogger });
 
       try {
         const { result } = await measurePerformance(
@@ -431,7 +432,7 @@ describe('📈 Performance Comparison Tests', () => {
 
     test('💾 Cache eviction under memory pressure', async () => {
       // Create a fresh instance with small cache limits
-      const smallCacheAdvZlib = new RefactoredAdvZlib({
+      const smallCacheAdvZlib = new AdvZlib({
         logger: silentLogger,
         maxCentralDirCount: 2, // Very small limit
         maxCacheMemoryMB: 1, // Very small memory limit
@@ -606,7 +607,7 @@ describe('📈 Performance Comparison Tests', () => {
       console.log(`🏗️ Testing disk cache with ${fileSizeThresholdMB}MB threshold for ${largeZipSizeMB}MB ZIP`);
 
       // Create a fresh instance with small memory limits to force disk caching
-      const diskCacheAdvZlib = new RefactoredAdvZlib({
+      const diskCacheAdvZlib = new AdvZlib({
         logger: silentLogger,
         maxContentCacheFileSizeMB: fileSizeThresholdMB, // Threshold to force disk caching
         maxContentCacheMemoryMB: 10, // Small memory limit
@@ -725,7 +726,7 @@ describe('📈 Performance Comparison Tests', () => {
   test('📊 Performance Summary', () => {
     console.log('');
     console.log('🎉 Performance Tests Complete!');
-    console.log('📈 RefactoredAdvZlib shows significant performance improvements');
+    console.log('📈 AdvZlib shows significant performance improvements');
     console.log('🚀 Cache effectiveness demonstrated across all scenarios');
     console.log('💾 Memory usage remains controlled and efficient');
     console.log('🗜️ Decompressed content caching provides excellent performance');

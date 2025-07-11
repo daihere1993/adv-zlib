@@ -28,11 +28,13 @@
   "devDependencies": {
     "@types/archiver": "^6.0.3",
     "@types/node": "^20.17.12",
+    "@types/yauzl": "^2.10.0",
     "@vitest/coverage-v8": "^3.0.4",
-    "adv-zlib": "v0.2.3",
+    "adv-zlib": "v0.2.4",
     "archiver": "^7.0.1",
     "typescript": "^5.3.3",
-    "vitest": "^3.0.4"
+    "vitest": "^3.0.4",
+    "yauzl": "^3.2.0"
   },
   "engines": {
     "node": ">=16"

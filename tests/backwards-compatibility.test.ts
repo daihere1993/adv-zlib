@@ -1,18 +1,14 @@
 import { describe, test, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import { promises as fs } from 'fs';
 import { join } from 'path';
-import { RefactoredAdvZlib } from '../../src/refactor/adv-zlib';
-// TODO: Fix API compatibility issue with installed adv-zlib@0.2.2
-// The installed version seems to have different method signatures
-// Temporarily using local implementation until API issue is resolved
-// import AdvZlib from '../../src/index'; // Legacy implementation (temporary)
-import AdvZlib from 'adv-zlib';
-import { createBasicTestZipFiles, BasicTestAssets } from './utils/test-assets';
+import AdvZlib from '../src/index';
+import AdvZlibLegacy from '../node_modules/adv-zlib';
+import { createBasicTestZipFiles, BasicTestAssets } from './test-assets';
 
 describe('🔄 Backwards Compatibility Tests', () => {
-  const testAssetsDir = join(__dirname, 'test-assets');
-  let legacyAdvZlib: InstanceType<typeof AdvZlib>;
-  let refactoredAdvZlib: RefactoredAdvZlib;
+  const testAssetsDir = join(__dirname, 'test-assets-01-backwards');
+  let legacyAdvZlib: AdvZlibLegacy;
+  let refactoredAdvZlib: AdvZlib;
   let basicAssets: BasicTestAssets;
 
   const silentLogger = {
@@ -30,8 +26,8 @@ describe('🔄 Backwards Compatibility Tests', () => {
     basicAssets = await createBasicTestZipFiles(testAssetsDir);
 
     // Initialize both implementations
-    legacyAdvZlib = new AdvZlib({ cacheBaseDir: testAssetsDir });
-    refactoredAdvZlib = new RefactoredAdvZlib({
+    legacyAdvZlib = new AdvZlibLegacy({ cacheBaseDir: testAssetsDir });
+    refactoredAdvZlib = new AdvZlib({
       logger: silentLogger,
       enableContentCaching: true,
     });
@@ -372,8 +368,8 @@ describe('🔄 Backwards Compatibility Tests', () => {
       await expect(refactoredAdvZlib.cleanup()).resolves.toBeUndefined();
 
       // Reinitialize for further tests
-      legacyAdvZlib = new AdvZlib({ cacheBaseDir: testAssetsDir });
-      refactoredAdvZlib = new RefactoredAdvZlib({
+      legacyAdvZlib = new AdvZlibLegacy({ cacheBaseDir: testAssetsDir });
+      refactoredAdvZlib = new AdvZlib({
         logger: silentLogger,
         enableContentCaching: true,
       });
@@ -410,7 +406,7 @@ describe('🔄 Backwards Compatibility Tests', () => {
   test('✅ Backwards Compatibility Summary', () => {
     console.log('');
     console.log('🎉 Backwards Compatibility Tests Complete!');
-    console.log('✅ RefactoredAdvZlib maintains 100% API compatibility');
+    console.log('✅ AdvZlib maintains 100% API compatibility');
     console.log('✅ All public methods behave identically to legacy implementation');
     console.log('✅ Error handling matches legacy behavior');
     console.log('✅ Edge cases handled consistently');

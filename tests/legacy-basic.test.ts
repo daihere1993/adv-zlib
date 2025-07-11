@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { AdvZlib } from '../src/adv-zlib';
-import { ZipEntry } from '../src/entry';
+import AdvZlib from '../src/index';
+import { ZipEntry } from '../src/adv-zlib';
 import { createZipFromStructure, DEFAULT_CONTENT } from './fixture';
 import { createPermanentAssets, assetsFiles } from './setup';
 

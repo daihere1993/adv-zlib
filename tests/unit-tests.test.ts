@@ -1,11 +1,11 @@
 import { describe, test, expect, beforeAll, beforeEach, afterEach, afterAll } from 'vitest';
 import { promises as fs } from 'fs';
 import { join } from 'path';
-import { RefactoredAdvZlib } from '../../src/refactor/adv-zlib';
-import { createBasicTestZipFiles, BasicTestAssets } from './utils/test-assets';
+import AdvZlib from '../src/index';
+import { createBasicTestZipFiles, BasicTestAssets } from './test-assets';
 
 describe('🧩 Unit Tests', () => {
-  const testAssetsDir = join(__dirname, 'test-assets');
+  const testAssetsDir = join(__dirname, 'test-assets-03-unit');
   let testAssets: BasicTestAssets;
 
   const silentLogger = {
@@ -24,11 +24,11 @@ describe('🧩 Unit Tests', () => {
     await fs.rm(testAssetsDir, { recursive: true, force: true });
   });
 
-  describe('RefactoredAdvZlib Class', () => {
-    let advZlib: RefactoredAdvZlib;
+  describe('AdvZlib Class', () => {
+    let advZlib: AdvZlib;
 
     beforeEach(() => {
-      advZlib = new RefactoredAdvZlib({
+      advZlib = new AdvZlib({
         logger: silentLogger,
         enableContentCaching: true,
         maxCentralDirCount: 5,
@@ -43,13 +43,13 @@ describe('🧩 Unit Tests', () => {
     });
 
     test('should initialize with default options', () => {
-      const defaultAdvZlib = new RefactoredAdvZlib();
+      const defaultAdvZlib = new AdvZlib();
       expect(defaultAdvZlib).toBeDefined();
       expect(defaultAdvZlib.getCacheStats).toBeDefined();
     });
 
     test('should initialize with custom options', () => {
-      const customAdvZlib = new RefactoredAdvZlib({
+      const customAdvZlib = new AdvZlib({
         logger: silentLogger,
         enableContentCaching: false,
         maxCentralDirCount: 20,
@@ -97,10 +97,10 @@ describe('🧩 Unit Tests', () => {
   });
 
   describe('CentralDir Cache Logic', () => {
-    let advZlib: RefactoredAdvZlib;
+    let advZlib: AdvZlib;
 
     beforeEach(() => {
-      advZlib = new RefactoredAdvZlib({
+      advZlib = new AdvZlib({
         logger: silentLogger,
         maxCentralDirCount: 2, // Small limit for testing eviction
         maxCacheMemoryMB: 1,
@@ -150,10 +150,10 @@ describe('🧩 Unit Tests', () => {
   });
 
   describe('Content Cache Logic', () => {
-    let advZlib: RefactoredAdvZlib;
+    let advZlib: AdvZlib;
 
     beforeEach(() => {
-      advZlib = new RefactoredAdvZlib({
+      advZlib = new AdvZlib({
         logger: silentLogger,
         enableContentCaching: true,
         maxContentCacheCount: 3, // Small limit for testing
@@ -197,7 +197,7 @@ describe('🧩 Unit Tests', () => {
     });
 
     test('should handle cache with disabled content caching', async () => {
-      const noCacheAdvZlib = new RefactoredAdvZlib({
+      const noCacheAdvZlib = new AdvZlib({
         logger: silentLogger,
         enableContentCaching: false,
       });
@@ -215,10 +215,10 @@ describe('🧩 Unit Tests', () => {
   });
 
   describe('ZipEntry Behavior', () => {
-    let advZlib: RefactoredAdvZlib;
+    let advZlib: AdvZlib;
 
     beforeEach(() => {
-      advZlib = new RefactoredAdvZlib({
+      advZlib = new AdvZlib({
         logger: silentLogger,
         enableContentCaching: true,
       });
@@ -286,10 +286,10 @@ describe('🧩 Unit Tests', () => {
   });
 
   describe('Path Resolution Logic', () => {
-    let advZlib: RefactoredAdvZlib;
+    let advZlib: AdvZlib;
 
     beforeEach(() => {
-      advZlib = new RefactoredAdvZlib({ logger: silentLogger });
+      advZlib = new AdvZlib({ logger: silentLogger });
     });
 
     afterEach(async () => {
@@ -344,10 +344,10 @@ describe('🧩 Unit Tests', () => {
   });
 
   describe('Error Handling', () => {
-    let advZlib: RefactoredAdvZlib;
+    let advZlib: AdvZlib;
 
     beforeEach(() => {
-      advZlib = new RefactoredAdvZlib({ logger: silentLogger });
+      advZlib = new AdvZlib({ logger: silentLogger });
     });
 
     afterEach(async () => {
@@ -391,7 +391,7 @@ describe('🧩 Unit Tests', () => {
 
   describe('Memory Management', () => {
     test('should respect memory limits', async () => {
-      const limitedAdvZlib = new RefactoredAdvZlib({
+      const limitedAdvZlib = new AdvZlib({
         logger: silentLogger,
         maxCentralDirCount: 1,
         maxCacheMemoryMB: 0.1, // Very small limit
@@ -418,7 +418,7 @@ describe('🧩 Unit Tests', () => {
     });
 
     test('should handle files efficiently', async () => {
-      const advZlib = new RefactoredAdvZlib({
+      const advZlib = new AdvZlib({
         logger: silentLogger,
         enableContentCaching: true,
       });

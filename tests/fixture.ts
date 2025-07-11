@@ -41,7 +41,7 @@ export async function createZipFromStructure(baseDir: string, structure: string)
         // Directory
         archive.append('', { name: fullPath.endsWith('/') ? fullPath : `${fullPath}/` });
         stack.push({ indent, path: fullPath });
-      } else if (name.endsWith('.zip') && stack.length > 0) {
+      } else if (name.toLowerCase().endsWith('.zip') && stack.length > 0) {
         // Nested ZIP
         const nestedArchive = archiver('zip', { zlib: { level: 9 } });
         const nestedBuffer = await new Promise<Buffer>((resolve, reject) => {
@@ -76,7 +76,7 @@ export async function createZipFromStructure(baseDir: string, structure: string)
 
   // Parse structure to find the main ZIP file name
   const lines: string[] = structure.split('\n').filter((line) => line.trim().length > 0);
-  const zipFileNameMatch = lines[0].match(/(.+\.zip)$/);
+  const zipFileNameMatch = lines[0].match(/(.+\.zip)$/i);
 
   if (!zipFileNameMatch) {
     throw new Error('Invalid structure: Root ZIP file name not found');
