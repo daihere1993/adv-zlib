@@ -1,0 +1,80 @@
+name: Auto Version Bump
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  version-bump:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: latest
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Determine version bump type
+        id: bump-type
+        run: |
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          PR_LABELS="${{ join(github.event.pull_request.labels.*.name, ' ') }}"
+          
+          # Check for breaking changes
+          if [[ "$PR_TITLE" =~ ^(feat!|fix!|BREAKING) ]] || [[ "$PR_LABELS" =~ breaking ]]; then
+            echo "bump=major" >> $GITHUB_OUTPUT
+            echo "Detected breaking change - major version bump"
+          # Check for features
+          elif [[ "$PR_TITLE" =~ ^feat ]] || [[ "$PR_LABELS" =~ feature ]]; then
+            echo "bump=minor" >> $GITHUB_OUTPUT
+            echo "Detected feature - minor version bump"
+          # Default to patch for fixes, chores, etc.
+          else
+            echo "bump=patch" >> $GITHUB_OUTPUT
+            echo "Default patch version bump"
+          fi
+
+      - name: Bump version
+        run: |
+          BUMP_TYPE="${{ steps.bump-type.outputs.bump }}"
+          
+          # Install semver for version manipulation
+          npm install -g semver
+          
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          NEW_VERSION=$(semver -i $BUMP_TYPE $CURRENT_VERSION)
+          
+          echo "Bumping version from $CURRENT_VERSION to $NEW_VERSION"
+          
+          # Update package.json
+          npm version $NEW_VERSION --no-git-tag-version
+          
+          # Commit and push
+          git add package.json
+          git commit -m "chore: bump version to $NEW_VERSION [skip ci]"
+          git push origin main
+
+      - name: Create summary
+        run: |
+          echo "## Version Bump Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **PR:** ${{ github.event.pull_request.title }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Type:** ${{ steps.bump-type.outputs.bump }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **New Version:** $(node -p 'require(\"./package.json\").version')" >> $GITHUB_STEP_SUMMARY
