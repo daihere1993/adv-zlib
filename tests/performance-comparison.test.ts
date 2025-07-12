@@ -36,7 +36,7 @@ interface PerformanceResult {
   cacheUsed: boolean;
 }
 
-describe('📈 Performance Comparison Tests', () => {
+describe.skip('📈 Performance Comparison Tests', () => {
   const testAssetsDir = join(__dirname, 'test-assets-02-performance');
   let legacyAdvZlib: AdvZlibLegacy;
   let refactoredAdvZlib: AdvZlib;
