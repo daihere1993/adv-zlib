@@ -648,7 +648,9 @@ export class CentralDirFileHeader {
     // Extract filename if present
     if (this.fileNameLength > 0) {
       const fileNameBuffer = data.subarray(CentralDirFileHeader.MIN_SIZE, CentralDirFileHeader.MIN_SIZE + this.fileNameLength);
-      this.fileName = fileNameBuffer.toString('utf8');
+      // Normalize the file name to accommodate windows as the separator always be "/"
+      // normalize() would consume more memory that is why we do it on-demand
+      this.fileName = path.normalize(fileNameBuffer.toString('utf8'));
     } else {
       this.fileName = '';
     }
