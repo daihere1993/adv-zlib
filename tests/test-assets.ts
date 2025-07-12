@@ -1,6 +1,7 @@
 import { promises as fs, createWriteStream } from 'fs';
 import { join } from 'path';
 import archiver from 'archiver';
+import { debug, info, warn, error } from './test-utils';
 
 // ===== BASIC TEST ASSETS =====
 // These are lightweight assets for functional and backwards compatibility testing
@@ -52,7 +53,7 @@ export async function createBasicTestZipFiles(assetsDir: string): Promise<BasicT
     unusualNames: join(assetsDir, 'unusual-names.zip'),
   };
 
-  console.log('📦 Creating basic test assets for functional testing...');
+  info('Creating basic test assets for functional testing...');
 
   // Create basic test ZIP files in parallel
   const zipCreationPromises = [
@@ -65,7 +66,7 @@ export async function createBasicTestZipFiles(assetsDir: string): Promise<BasicT
   ];
 
   await Promise.all(zipCreationPromises);
-  console.log('✅ Basic test assets created successfully');
+  info('Basic test assets created successfully');
 
   return basicAssets;
 }
@@ -91,7 +92,7 @@ export async function createPerformanceTestZipFiles(assetsDir: string): Promise<
     largeNestedZip: join(assetsDir, 'large-nested-zip.zip'),
   };
 
-  console.log('🏃 Creating performance test assets for benchmarking...');
+  info('Creating performance test assets for benchmarking...');
 
   // Create performance test ZIP files in parallel
   const zipCreationPromises = [
@@ -108,17 +109,17 @@ export async function createPerformanceTestZipFiles(assetsDir: string): Promise<
   // Verify the large nested ZIP was created correctly
   try {
     const largeNestedStats = await fs.stat(performanceAssets.largeNestedZip);
-    console.log(`✅ Large nested ZIP created: ${(largeNestedStats.size / 1024 / 1024).toFixed(1)}MB`);
+    info(`Large nested ZIP created: ${(largeNestedStats.size / 1024 / 1024).toFixed(1)}MB`);
     
     if (largeNestedStats.size < 1024 * 1024) { // Less than 1MB is suspicious
-      console.warn(`⚠️ Large nested ZIP seems unusually small: ${(largeNestedStats.size / 1024).toFixed(1)}KB`);
+      warn(`Large nested ZIP seems unusually small: ${(largeNestedStats.size / 1024).toFixed(1)}KB`);
     }
   } catch (error) {
-    console.error(`❌ Failed to verify large nested ZIP creation:`, error);
+    error(`Failed to verify large nested ZIP creation:`, error);
     throw error;
   }
 
-  console.log('✅ Performance test assets created successfully');
+  info('Performance test assets created successfully');
   return performanceAssets;
 }
 
@@ -128,7 +129,7 @@ export async function createPerformanceTestZipFiles(assetsDir: string): Promise<
  * This function is kept for backwards compatibility but is not recommended for new tests.
  */
 export async function createTestZipFiles(assetsDir: string): Promise<TestAssets> {
-  console.log('📦 Creating comprehensive test assets (deprecated - use specific asset creators)...');
+  info('Creating comprehensive test assets (deprecated - use specific asset creators)...');
   
   const [basicAssets, performanceAssets] = await Promise.all([
     createBasicTestZipFiles(assetsDir),
@@ -468,20 +469,20 @@ async function createManyEntriesZip(outputPath: string): Promise<void> {
  * Creates a ZIP with a large nested ZIP entry for testing large content caching
  */
 async function createLargeNestedZip(outputPath: string, tempDir: string): Promise<void> {
-  console.log(`🏗️ Creating large nested ZIP at: ${outputPath}`);
+  debug(`Creating large nested ZIP at: ${outputPath}`);
   
   // First create a large inner ZIP (simulated large content)
   const largeInnerZipPath = join(tempDir, 'large-inner.zip');
   
   try {
-    console.log(`📦 Creating large inner ZIP at: ${largeInnerZipPath}`);
+    debug(`Creating large inner ZIP at: ${largeInnerZipPath}`);
     await createLargeInnerZip(largeInnerZipPath);
     
     // Verify the inner ZIP was created successfully
     const innerStats = await fs.stat(largeInnerZipPath);
-    console.log(`✅ Large inner ZIP created: ${(innerStats.size / 1024 / 1024).toFixed(1)}MB`);
+    debug(`Large inner ZIP created: ${(innerStats.size / 1024 / 1024).toFixed(1)}MB`);
   } catch (error) {
-    console.error(`❌ Failed to create large inner ZIP:`, error);
+          error(`Failed to create large inner ZIP:`, error);
     throw error;
   }
 
@@ -490,30 +491,30 @@ async function createLargeNestedZip(outputPath: string, tempDir: string): Promis
     const archive = archiver('zip', { zlib: { level: 6 } });
 
     output.on('close', async () => {
-      console.log(`✅ Large nested ZIP created successfully at: ${outputPath}`);
+      debug(`Large nested ZIP created successfully at: ${outputPath}`);
       
       // Verify the outer ZIP was created
       try {
         const outerStats = await fs.stat(outputPath);
-        console.log(`📊 Final ZIP size: ${(outerStats.size / 1024 / 1024).toFixed(1)}MB`);
+        debug(`Final ZIP size: ${(outerStats.size / 1024 / 1024).toFixed(1)}MB`);
       } catch (e) {
-        console.warn(`⚠️ Could not verify final ZIP size: ${e}`);
+                  warn(`Could not verify final ZIP size: ${e}`);
       }
       
       // Clean up temporary large inner ZIP
       try {
         await fs.unlink(largeInnerZipPath);
-        console.log(`🧹 Cleaned up temporary inner ZIP`);
+        debug(`Cleaned up temporary inner ZIP`);
       } catch (e) {
-        console.warn(`⚠️ Could not clean up temporary file: ${e}`);
+                  warn(`Could not clean up temporary file: ${e}`);
       }
       resolve();
     });
     
-    archive.on('error', (error) => {
-      console.error(`❌ Archive error during large nested ZIP creation:`, error);
-      reject(error);
-    });
+          archive.on('error', (err) => {
+        error(`Archive error during large nested ZIP creation:`, err);
+        reject(err);
+      });
 
     archive.on('warning', (warn) => {
       console.warn(`⚠️ Archive warning:`, warn);
@@ -521,14 +522,14 @@ async function createLargeNestedZip(outputPath: string, tempDir: string): Promis
 
     archive.pipe(output);
 
-    console.log(`📁 Adding large inner ZIP to outer ZIP with name: large-content.zip`);
+          debug(`Adding large inner ZIP to outer ZIP with name: large-content.zip`);
     
     // Add the large inner ZIP and some other files
     archive.file(largeInnerZipPath, { name: 'large-content.zip' });
     archive.append('Outer file for testing', { name: 'outer.txt' });
     archive.append('Another outer file', { name: 'metadata.txt' });
 
-    console.log(`🔄 Finalizing large nested ZIP...`);
+          debug(`Finalizing large nested ZIP...`);
     archive.finalize();
   });
 }
@@ -546,9 +547,9 @@ async function createLargeInnerZip(outputPath: string): Promise<void> {
   const filesCount = Math.min(10, Math.max(1, sizeInMB / 200)); // ~200MB per file, max 10 files
   const mbPerFile = Math.ceil(sizeInMB / filesCount);
   
-  console.log(`📦 Creating large inner ZIP (~${sizeInMB}MB with ${filesCount} files)...`);
-  console.log(`📝 Each file will be approximately ${mbPerFile}MB`);
-  console.log(`⏱️  This may take several minutes for large sizes.`);
+  debug(`Creating large inner ZIP (~${sizeInMB}MB with ${filesCount} files)...`);
+  debug(`Each file will be approximately ${mbPerFile}MB`);
+  debug(`This may take several minutes for large sizes.`);
 
   return new Promise((resolve, reject) => {
     const output = createWriteStream(outputPath);
@@ -557,19 +558,19 @@ async function createLargeInnerZip(outputPath: string): Promise<void> {
     let totalSizeAdded = 0;
 
     output.on('close', () => {
-      console.log(`✅ Large inner ZIP created successfully (${sizeInMB}MB target, ${totalSizeAdded}MB content added)`);
+      debug(`Large inner ZIP created successfully (${sizeInMB}MB target, ${totalSizeAdded}MB content added)`);
       resolve();
     });
     
-    output.on('error', (error) => {
-      console.error(`❌ Output stream error:`, error);
-      reject(error);
-    });
+          output.on('error', (err) => {
+        error(`Output stream error:`, err);
+        reject(err);
+      });
     
-    archive.on('error', (error) => {
-      console.error(`❌ Archive error during large inner ZIP creation:`, error);
-      reject(error);
-    });
+          archive.on('error', (err) => {
+        error(`Archive error during large inner ZIP creation:`, err);
+        reject(err);
+      });
 
     archive.on('warning', (warn) => {
       console.warn(`⚠️ Archive warning:`, warn);
@@ -580,7 +581,7 @@ async function createLargeInnerZip(outputPath: string): Promise<void> {
     try {
       // Create the large files
       for (let i = 0; i < filesCount; i++) {
-        console.log(`📝 Creating large file ${i + 1}/${filesCount} (~${mbPerFile}MB)...`);
+        debug(`Creating large file ${i + 1}/${filesCount} (~${mbPerFile}MB)...`);
         
         // Create content in manageable chunks to avoid memory issues
         const repeatCount = mbPerFile * 1024 * 20; // ~50 bytes per repeat = ~1MB per 20K repeats
@@ -608,12 +609,12 @@ async function createLargeInnerZip(outputPath: string): Promise<void> {
         archive.append(`Small test file ${i} content`, { name: `small-files/test-${i}.txt` });
       }
 
-      console.log(`📦 Finalizing large inner ZIP... (${totalSizeAdded.toFixed(1)}MB content added)`);
+      debug(`Finalizing large inner ZIP... (${totalSizeAdded.toFixed(1)}MB content added)`);
       archive.finalize();
-    } catch (error) {
-      console.error(`❌ Error during large inner ZIP creation:`, error);
-      reject(error);
-    }
+          } catch (err) {
+        error(`Error during large inner ZIP creation:`, err);
+        reject(err);
+      }
   });
 }
 

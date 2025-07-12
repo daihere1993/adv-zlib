@@ -27,6 +27,7 @@ import {
   BasicTestAssets,
   PerformanceTestAssets,
 } from './test-assets';
+import { debug, info, warn, error } from './test-utils';
 
 interface PerformanceResult {
   operation: string;
@@ -54,10 +55,10 @@ describe.skip('📈 Performance Comparison Tests', () => {
   beforeAll(async () => {
     // Configure test environment
     const largeZipSizeMB = parseInt(process.env.TEST_LARGE_ZIP_SIZE_MB || '2048', 10);
-    console.log(`🔧 Configured for large ZIP size: ${largeZipSizeMB}MB`);
+    info(`Configured for large ZIP size: ${largeZipSizeMB}MB`);
 
     if (largeZipSizeMB >= 1024) {
-      console.log('⚠️  Large ZIP creation (>=1GB) may take several minutes...');
+      warn('Large ZIP creation (>=1GB) may take several minutes...');
     }
 
     await fs.mkdir(testAssetsDir, { recursive: true });
@@ -107,13 +108,13 @@ describe.skip('📈 Performance Comparison Tests', () => {
       try {
         await legacyFn();
       } catch (error) {
-        console.warn(`⚠️ Legacy warm-up failed for ${operation}:`, error.message);
+        warn(`Legacy warm-up failed for ${operation}:`, error.message);
       }
 
       try {
         await refactoredFn();
       } catch (error) {
-        console.warn(`⚠️ Refactored warm-up failed for ${operation}:`, error.message);
+        warn(`Refactored warm-up failed for ${operation}:`, error.message);
       }
     }
 
@@ -158,8 +159,8 @@ describe.skip('📈 Performance Comparison Tests', () => {
           false
         );
 
-        console.log(
-          `📊 First ZIP Access: ${result.legacyTime.toFixed(2)}ms → ${result.refactoredTime.toFixed(
+        debug(
+          `First ZIP Access: ${result.legacyTime.toFixed(2)}ms → ${result.refactoredTime.toFixed(
             2
           )}ms (${result.improvement.toFixed(1)}x)`
         );
@@ -184,8 +185,8 @@ describe.skip('📈 Performance Comparison Tests', () => {
           false
         );
 
-        console.log(
-          `📊 Compressed ZIP: ${result.legacyTime.toFixed(2)}ms → ${result.refactoredTime.toFixed(
+        debug(
+          `Compressed ZIP: ${result.legacyTime.toFixed(2)}ms → ${result.refactoredTime.toFixed(
             2
           )}ms (${result.improvement.toFixed(1)}x)`
         );
@@ -248,7 +249,7 @@ describe.skip('📈 Performance Comparison Tests', () => {
       const largeFile = entries.find((entry) => !entry.isDirectory && entry.size > 1000);
 
       if (!largeFile) {
-        console.log('🔥 Content Re-read: Skipped (no suitable file found)');
+        debug('Content Re-read: Skipped (no suitable file found)');
         return;
       }
 
@@ -259,7 +260,7 @@ describe.skip('📈 Performance Comparison Tests', () => {
       const refactoredExists = await refactoredAdvZlib.exists(filePath);
 
       if (!legacyExists || !refactoredExists) {
-        console.log('🔥 Content Re-read: Skipped (file not found)');
+        debug('Content Re-read: Skipped (file not found)');
         return;
       }
 
@@ -327,7 +328,7 @@ describe.skip('📈 Performance Comparison Tests', () => {
       const largeFile = entries.find((entry) => !entry.isDirectory && entry.size > 100);
 
       if (!largeFile) {
-        console.log('🔥 Large Content: Skipped (no large files found)');
+        debug('Large Content: Skipped (no large files found)');
         return;
       }
 
@@ -338,7 +339,7 @@ describe.skip('📈 Performance Comparison Tests', () => {
       const refactoredExists = await refactoredAdvZlib.exists(filePath);
 
       if (!legacyExists || !refactoredExists) {
-        console.log('🔥 Large Content: Skipped (file not accessible)');
+        debug('Large Content: Skipped (file not accessible)');
         return;
       }
 
@@ -418,12 +419,12 @@ describe.skip('📈 Performance Comparison Tests', () => {
     test('💾 Cache memory usage validation', () => {
       const stats = refactoredAdvZlib.getCacheStats();
 
-      console.log('💾 Cache Statistics:');
-      console.log(`   CentralDir Cache: ${stats.centralDir.entries} entries, ${stats.centralDir.memoryMB}MB`);
-      console.log(
+      debug('Cache Statistics:');
+      debug(`   CentralDir Cache: ${stats.centralDir.entries} entries, ${stats.centralDir.memoryMB}MB`);
+      debug(
         `   Content Cache: ${stats.content.entries} entries (${stats.content.memoryEntries} memory, ${stats.content.diskEntries} disk), ${stats.content.memoryMB}MB`
       );
-      console.log(`   Total Cache: ${stats.total.entries} entries, ${stats.total.memoryMB}MB`);
+      debug(`   Total Cache: ${stats.total.entries} entries, ${stats.total.memoryMB}MB`);
 
       // Validate memory is within reasonable bounds
       expect(stats.total.memoryMB).toBeLessThan(200); // Should be under 200MB
@@ -449,7 +450,7 @@ describe.skip('📈 Performance Comparison Tests', () => {
 
         const stats = smallCacheAdvZlib.getCacheStats();
 
-        console.log(`💾 Small Cache Stats: ${stats.total.entries} entries, ${stats.total.memoryMB}MB`);
+        debug(`Small Cache Stats: ${stats.total.entries} entries, ${stats.total.memoryMB}MB`);
 
         // Should have evicted some entries due to limits
         expect(stats.centralDir.entries).toBeLessThanOrEqual(2);
@@ -464,7 +465,7 @@ describe.skip('📈 Performance Comparison Tests', () => {
     test('📋 Verify performance test assets were created correctly', async () => {
       // Verify the many entries ZIP
       const manyEntriesStats = await fs.stat(performanceAssets.manyEntries);
-      console.log(`📂 Many entries ZIP: ${(manyEntriesStats.size / 1024 / 1024).toFixed(1)}MB`);
+      debug(`Many entries ZIP: ${(manyEntriesStats.size / 1024 / 1024).toFixed(1)}MB`);
       expect(manyEntriesStats.size).toBeGreaterThan(1024 * 1024); // At least 1MB
 
       // Verify the large nested ZIP
@@ -472,18 +473,18 @@ describe.skip('📈 Performance Comparison Tests', () => {
       const largeNestedSizeMB = largeNestedStats.size / 1024 / 1024;
       const expectedSizeMB = parseInt(process.env.TEST_LARGE_ZIP_SIZE_MB || '2048', 10);
 
-      console.log(`🗜️ Large nested ZIP: ${largeNestedSizeMB.toFixed(1)}MB (expected ~${expectedSizeMB}MB)`);
+      debug(`Large nested ZIP: ${largeNestedSizeMB.toFixed(1)}MB (expected ~${expectedSizeMB}MB)`);
 
       // Should be at least some reasonable size (accounting for compression and small test sizes)
       // Note: Test data compresses extremely well, so we use a very small threshold
       expect(largeNestedSizeMB).toBeGreaterThan(0.001); // At least 1KB
 
       // First, verify we can read the outer ZIP structure
-      console.log(`🔍 Checking outer ZIP structure: ${performanceAssets.largeNestedZip}`);
+      debug(`Checking outer ZIP structure: ${performanceAssets.largeNestedZip}`);
       const outerEntries = await refactoredAdvZlib.getEntries(performanceAssets.largeNestedZip);
-      console.log(`🗜️ Outer ZIP contains ${outerEntries.length} entries:`);
+      debug(`Outer ZIP contains ${outerEntries.length} entries`);
       outerEntries.forEach((entry) => {
-        console.log(`   - ${entry.relPath} (${entry.isDirectory ? 'directory' : 'file'}, ${(entry.size / 1024).toFixed(1)}KB)`);
+        debug(`   - ${entry.relPath} (${entry.isDirectory ? 'directory' : 'file'}, ${(entry.size / 1024).toFixed(1)}KB)`);
       });
 
       // Look for the large-content.zip entry
@@ -494,20 +495,20 @@ describe.skip('📈 Performance Comparison Tests', () => {
         );
       }
 
-      console.log(`✅ Found large-content.zip entry: ${(largeContentEntry.size / 1024 / 1024).toFixed(1)}MB`);
+      debug(`Found large-content.zip entry: ${(largeContentEntry.size / 1024 / 1024).toFixed(1)}MB`);
 
       // Now try to access the nested ZIP structure
       const nestedZipPath = `${performanceAssets.largeNestedZip}/large-content.zip`;
-      console.log(`🔍 Accessing nested ZIP: ${nestedZipPath}`);
+      debug(`Accessing nested ZIP: ${nestedZipPath}`);
 
       try {
         const entries = await refactoredAdvZlib.getEntries(nestedZipPath);
-        console.log(`🗜️ Large nested ZIP contains ${entries.length} entries`);
+        debug(`Large nested ZIP contains ${entries.length} entries`);
         expect(entries.length).toBeGreaterThan(10); // Should have the large files plus extras
-      } catch (error) {
-        console.error(`❌ Failed to access nested ZIP: ${error}`);
-        throw error;
-      }
+              } catch (error) {
+          error(`Failed to access nested ZIP: ${error}`);
+          throw error;
+        }
     });
 
     test('📂 Many entries ZIP performance', async () => {
@@ -518,8 +519,8 @@ describe.skip('📈 Performance Comparison Tests', () => {
         false
       );
 
-      console.log(
-        `📂 Many Entries: ${result.legacyTime.toFixed(2)}ms → ${result.refactoredTime.toFixed(2)}ms (${result.improvement.toFixed(
+      debug(
+        `Many Entries: ${result.legacyTime.toFixed(2)}ms → ${result.refactoredTime.toFixed(2)}ms (${result.improvement.toFixed(
           1
         )}x)`
       );
@@ -532,8 +533,8 @@ describe.skip('📈 Performance Comparison Tests', () => {
         true
       );
 
-      console.log(
-        `📂 Many Entries (Cached): ${cachedResult.legacyTime.toFixed(2)}ms → ${cachedResult.refactoredTime.toFixed(
+      debug(
+        `Many Entries (Cached): ${cachedResult.legacyTime.toFixed(2)}ms → ${cachedResult.refactoredTime.toFixed(
           2
         )}ms (${cachedResult.improvement.toFixed(1)}x)`
       );
@@ -552,8 +553,8 @@ describe.skip('📈 Performance Comparison Tests', () => {
         false
       );
 
-      console.log(
-        `🗜️ Large Nested ZIP: ${result.legacyTime.toFixed(2)}ms → ${result.refactoredTime.toFixed(
+      debug(
+        `Large Nested ZIP: ${result.legacyTime.toFixed(2)}ms → ${result.refactoredTime.toFixed(
           2
         )}ms (${result.improvement.toFixed(1)}x)`
       );
@@ -573,8 +574,8 @@ describe.skip('📈 Performance Comparison Tests', () => {
           false
         );
 
-        console.log(
-          `🗜️ Large Content Read: ${contentResult.legacyTime.toFixed(2)}ms → ${contentResult.refactoredTime.toFixed(
+        debug(
+          `Large Content Read: ${contentResult.legacyTime.toFixed(2)}ms → ${contentResult.refactoredTime.toFixed(
             2
           )}ms (${contentResult.improvement.toFixed(1)}x)`
         );
@@ -587,13 +588,13 @@ describe.skip('📈 Performance Comparison Tests', () => {
           true
         );
 
-        console.log(
-          `🗜️ Large Content Read (Cached): ${cachedContentResult.legacyTime.toFixed(
+        debug(
+          `Large Content Read (Cached): ${cachedContentResult.legacyTime.toFixed(
             2
           )}ms → ${cachedContentResult.refactoredTime.toFixed(2)}ms (${cachedContentResult.improvement.toFixed(1)}x)`
         );
       } else {
-        console.log('🗜️ Large Content Read: Skipped (file not accessible)');
+        debug('Large Content Read: Skipped (file not accessible)');
       }
 
       expect(result.improvement).toBeGreaterThan(0.005); // Should complete successfully
@@ -604,7 +605,7 @@ describe.skip('📈 Performance Comparison Tests', () => {
       const largeZipSizeMB = parseInt(process.env.TEST_LARGE_ZIP_SIZE_MB || '2048', 10);
       const fileSizeThresholdMB = Math.max(1, Math.floor(largeZipSizeMB / 400)); // Force disk caching for large files
 
-      console.log(`🏗️ Testing disk cache with ${fileSizeThresholdMB}MB threshold for ${largeZipSizeMB}MB ZIP`);
+      debug(`Testing disk cache with ${fileSizeThresholdMB}MB threshold for ${largeZipSizeMB}MB ZIP`);
 
       // Create a fresh instance with small memory limits to force disk caching
       const diskCacheAdvZlib = new AdvZlib({
@@ -624,32 +625,32 @@ describe.skip('📈 Performance Comparison Tests', () => {
         const exists = await diskCacheAdvZlib.exists(largeFileInNestedZip);
 
         if (exists) {
-          console.log('🏗️ Testing large file caching behavior...');
+          debug('Testing large file caching behavior...');
 
           // First read - should cache to disk (if file is large enough)
           const start1 = performance.now();
           const content1 = await diskCacheAdvZlib.read(largeFileInNestedZip);
           const end1 = performance.now();
-          console.log(`🏗️ First read: ${(end1 - start1).toFixed(2)}ms, size: ${(content1.length / 1024 / 1024).toFixed(1)}MB`);
+          debug(`First read: ${(end1 - start1).toFixed(2)}ms, size: ${(content1.length / 1024 / 1024).toFixed(1)}MB`);
 
           // Second read - should read from cache (memory or disk)
           const start2 = performance.now();
           const content2 = await diskCacheAdvZlib.read(largeFileInNestedZip);
           const end2 = performance.now();
-          console.log(`🏗️ Second read: ${(end2 - start2).toFixed(2)}ms (from cache)`);
+          debug(`Second read: ${(end2 - start2).toFixed(2)}ms (from cache)`);
 
           // Content should be identical
           expect(content1.equals(content2)).toBe(true);
 
           const stats = diskCacheAdvZlib.getCacheStats();
-          console.log(
-            `🏗️ Disk Cache Stats: ${stats.content.diskEntries} disk entries, ${stats.content.memoryEntries} memory entries`
+          debug(
+            `Disk Cache Stats: ${stats.content.diskEntries} disk entries, ${stats.content.memoryEntries} memory entries`
           );
-          console.log(`🏗️ Cache Memory Usage: ${stats.content.memoryMB}MB`);
+          debug(`Cache Memory Usage: ${stats.content.memoryMB}MB`);
 
           // Verify caching is working (second read should be faster or at least not slower)
           const speedup = (end1 - start1) / (end2 - start2);
-          console.log(`🏗️ Cache speedup: ${speedup.toFixed(1)}x`);
+          debug(`Cache speedup: ${speedup.toFixed(1)}x`);
           // For small files, caching might not show dramatic speedup due to OS filesystem caching
           // and the overhead of our cache management, so we just verify it's not significantly slower
           expect(speedup).toBeGreaterThan(0.1); // Should not be more than 10x slower
@@ -657,7 +658,7 @@ describe.skip('📈 Performance Comparison Tests', () => {
           // Should have cache entries (either disk or memory)
           expect(stats.content.entries).toBeGreaterThan(0);
         } else {
-          console.log('🏗️ Disk Cache: Skipped (large file not accessible)');
+          debug('Disk Cache: Skipped (large file not accessible)');
         }
       } finally {
         await diskCacheAdvZlib.cleanup();
@@ -678,8 +679,8 @@ describe.skip('📈 Performance Comparison Tests', () => {
           false
         );
 
-        console.log(
-          `🔧 ${compressionTest.name}: ${result.legacyTime.toFixed(2)}ms → ${result.refactoredTime.toFixed(
+        debug(
+          `${compressionTest.name}: ${result.legacyTime.toFixed(2)}ms → ${result.refactoredTime.toFixed(
             2
           )}ms (${result.improvement.toFixed(1)}x)`
         );
@@ -714,38 +715,36 @@ describe.skip('📈 Performance Comparison Tests', () => {
 
       const throughputImprovement = refactoredOpsPerSec / legacyOpsPerSec;
 
-      console.log(`⚡ Throughput Comparison:`);
-      console.log(`   Legacy: ${legacyOpsPerSec.toFixed(1)} ops/sec`);
-      console.log(`   Refactored: ${refactoredOpsPerSec.toFixed(1)} ops/sec`);
-      console.log(`   Improvement: ${throughputImprovement.toFixed(1)}x`);
+      debug(`Throughput Comparison:`);
+      debug(`   Legacy: ${legacyOpsPerSec.toFixed(1)} ops/sec`);
+      debug(`   Refactored: ${refactoredOpsPerSec.toFixed(1)} ops/sec`);
+      debug(`   Improvement: ${throughputImprovement.toFixed(1)}x`);
 
       expect(throughputImprovement).toBeGreaterThan(0.005); // Should complete successfully
     });
   });
 
   test('📊 Performance Summary', () => {
-    console.log('');
-    console.log('🎉 Performance Tests Complete!');
-    console.log('📈 AdvZlib shows significant performance improvements');
-    console.log('🚀 Cache effectiveness demonstrated across all scenarios');
-    console.log('💾 Memory usage remains controlled and efficient');
-    console.log('🗜️ Decompressed content caching provides excellent performance');
-    console.log('💽 Hybrid memory/disk caching handles large content efficiently');
-    console.log('📂 Many entries scenario shows improved handling');
-    console.log('🏗️ Performance test assets used for comprehensive evaluation');
-    console.log('');
+    info('Performance Tests Complete!');
+    info('AdvZlib shows significant performance improvements');
+    info('Cache effectiveness demonstrated across all scenarios');
+    info('Memory usage remains controlled and efficient');
+    info('Decompressed content caching provides excellent performance');
+    info('Hybrid memory/disk caching handles large content efficiently');
+    info('Many entries scenario shows improved handling');
+    info('Performance test assets used for comprehensive evaluation');
   });
 });
 
 function printPerformanceSummary(results: PerformanceResult[]): void {
-  console.log('\n' + '='.repeat(80));
-  console.log('📊 PERFORMANCE COMPARISON SUMMARY');
-  console.log('='.repeat(80));
+  info('\n' + '='.repeat(80));
+  info('PERFORMANCE COMPARISON SUMMARY');
+  info('='.repeat(80));
 
-  console.log('\n🏆 Performance Improvements:');
-  console.log('-'.repeat(80));
-  console.log('Operation'.padEnd(35) + 'Legacy'.padEnd(12) + 'Refactored'.padEnd(12) + 'Improvement');
-  console.log('-'.repeat(80));
+  info('\nPerformance Improvements:');
+  info('-'.repeat(80));
+  info('Operation'.padEnd(35) + 'Legacy'.padEnd(12) + 'Refactored'.padEnd(12) + 'Improvement');
+  info('-'.repeat(80));
 
   for (const result of results) {
     const legacyStr = `${result.legacyTime.toFixed(2)}ms`;
@@ -753,12 +752,12 @@ function printPerformanceSummary(results: PerformanceResult[]): void {
     const improvementStr = `${result.improvement.toFixed(1)}x`;
     const cacheIndicator = result.cacheUsed ? '🔥' : '❄️';
 
-    console.log(
+    info(
       `${cacheIndicator} ${result.operation}`.padEnd(35) + legacyStr.padEnd(12) + refactoredStr.padEnd(12) + improvementStr
     );
   }
 
-  console.log('-'.repeat(80));
+  info('-'.repeat(80));
 
   // Calculate averages
   const cachedResults = results.filter((r) => r.cacheUsed);
@@ -766,24 +765,24 @@ function printPerformanceSummary(results: PerformanceResult[]): void {
 
   if (cachedResults.length > 0) {
     const avgCachedImprovement = cachedResults.reduce((sum, r) => sum + r.improvement, 0) / cachedResults.length;
-    console.log(`\n🔥 Average Cached Performance Improvement: ${avgCachedImprovement.toFixed(1)}x`);
+    info(`\nAverage Cached Performance Improvement: ${avgCachedImprovement.toFixed(1)}x`);
   }
 
   if (coldResults.length > 0) {
     const avgColdImprovement = coldResults.reduce((sum, r) => sum + r.improvement, 0) / coldResults.length;
-    console.log(`❄️ Average Cold Start Performance: ${avgColdImprovement.toFixed(1)}x`);
+    info(`Average Cold Start Performance: ${avgColdImprovement.toFixed(1)}x`);
   }
 
   const overallAvg = results.reduce((sum, r) => sum + r.improvement, 0) / results.length;
-  console.log(`📈 Overall Average Improvement: ${overallAvg.toFixed(1)}x`);
+  info(`Overall Average Improvement: ${overallAvg.toFixed(1)}x`);
 
-  console.log('\n✨ Key Achievements:');
-  console.log('   • Significant speedup in repeated operations');
-  console.log('   • Effective two-tier caching (CentralDir + DecompressedContent)');
-  console.log('   • Hybrid memory/disk caching for large content');
-  console.log('   • Optimal performance for many entries scenarios');
-  console.log('   • Memory usage stays within configured limits');
-  console.log('   • No performance regressions in any scenario');
+  info('\nKey Achievements:');
+  info('   • Significant speedup in repeated operations');
+  info('   • Effective two-tier caching (CentralDir + DecompressedContent)');
+  info('   • Hybrid memory/disk caching for large content');
+  info('   • Optimal performance for many entries scenarios');
+  info('   • Memory usage stays within configured limits');
+  info('   • No performance regressions in any scenario');
 
-  console.log('\n' + '='.repeat(80) + '\n');
+  info('\n' + '='.repeat(80) + '\n');
 }

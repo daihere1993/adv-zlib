@@ -114,6 +114,18 @@ adv-zlib caches decompressed buffers of nested ZIPs (e.g., nest1.zip and nest2.z
 - **Compression APIs**: passible based on [archiver](https://github.com/archiverjs/node-archiver) to provide several sementic APIs for zip compression.
 - **Encryption APIs**: would provide APIs like `isEncrypted()` and add new arguments `password` to existed APIs to support encrypted zip files.
 
+## Testing
+
+The test suite includes comprehensive tests for functionality, performance, and backwards compatibility. The tests use a configurable logging system to control output verbosity:
+
+### Test Logging Options
+
+- **Default**: Clean output showing only essential information
+- **Verbose**: `TEST_VERBOSE=true npm test` - Shows detailed progress and performance metrics
+- **Silent**: `TEST_SILENT=true npm test` - Shows only test results and failures
+
+For more details, see [tests/README.md](tests/README.md).
+
 ## Report Issue
 Feel free to raise an issue if you find any bugs or have suggestions for improvements. I will reponse/fix them as soon as possible.
 

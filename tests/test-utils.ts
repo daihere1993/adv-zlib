@@ -1,6 +1,20 @@
 import fs from 'node:fs';
-import { formatBytes } from '../src/utils';
-import { MemoryUsage } from '../src/types.js';
+
+// Simple utility functions since the original imports don't exist
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+interface MemoryUsage {
+  heapUsed: number;
+  external: number;
+  heapTotal: number;
+  rss: number;
+}
 
 export interface TimingStats {
   mean: number;
@@ -109,3 +123,77 @@ export async function detectMemoryLeak(operation: string, fn: () => Promise<any>
 
   return isIncreasing;
 }
+
+/**
+ * Configurable test logger for controlling console output during tests
+ */
+export class TestLogger {
+  private static instance: TestLogger;
+  private verbose: boolean;
+  private silent: boolean;
+
+  private constructor() {
+    this.verbose = process.env.TEST_VERBOSE === 'true';
+    this.silent = process.env.TEST_SILENT === 'true';
+  }
+
+  static getInstance(): TestLogger {
+    if (!TestLogger.instance) {
+      TestLogger.instance = new TestLogger();
+    }
+    return TestLogger.instance;
+  }
+
+  log(message: string, ...args: any[]): void {
+    if (!this.silent) {
+      console.log(message, ...args);
+    }
+  }
+
+  warn(message: string, ...args: any[]): void {
+    if (!this.silent) {
+      console.warn(message, ...args);
+    }
+  }
+
+  error(message: string, ...args: any[]): void {
+    if (!this.silent) {
+      console.error(message, ...args);
+    }
+  }
+
+  debug(message: string, ...args: any[]): void {
+    if (this.verbose && !this.silent) {
+      console.log(`[DEBUG] ${message}`, ...args);
+    }
+  }
+
+  info(message: string, ...args: any[]): void {
+    if (this.verbose && !this.silent) {
+      console.log(`[INFO] ${message}`, ...args);
+    }
+  }
+
+  progress(message: string): void {
+    if (this.verbose && !this.silent) {
+      process.stdout.write(`\r${message}`);
+    }
+  }
+
+  clearProgress(): void {
+    if (this.verbose && !this.silent) {
+      process.stdout.write('\n');
+    }
+  }
+}
+
+// Convenience functions
+export const testLogger = TestLogger.getInstance();
+
+export const log = (message: string, ...args: any[]) => testLogger.log(message, ...args);
+export const warn = (message: string, ...args: any[]) => testLogger.warn(message, ...args);
+export const error = (message: string, ...args: any[]) => testLogger.error(message, ...args);
+export const debug = (message: string, ...args: any[]) => testLogger.debug(message, ...args);
+export const info = (message: string, ...args: any[]) => testLogger.info(message, ...args);
+export const progress = (message: string) => testLogger.progress(message);
+export const clearProgress = () => testLogger.clearProgress();

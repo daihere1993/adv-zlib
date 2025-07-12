@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import archiver from 'archiver';
+import { debug } from './test-utils';
 
 export const DEFAULT_CONTENT = 'TEST';
 
@@ -90,7 +91,7 @@ export async function createZipFromStructure(baseDir: string, structure: string)
     const archive = archiver('zip', { zlib: { level: 9 } });
 
     output.on('close', () => {
-      console.log(`ZIP file created at ${outputPath} (${archive.pointer()} bytes)`);
+      debug(`ZIP file created at ${outputPath} (${archive.pointer()} bytes)`);
       resolve();
     });
 

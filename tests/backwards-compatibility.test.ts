@@ -4,6 +4,7 @@ import { join } from 'path';
 import AdvZlib from '../src/index';
 import AdvZlibLegacy from '../node_modules/adv-zlib';
 import { createBasicTestZipFiles, BasicTestAssets } from './test-assets';
+import { debug, info, warn } from './test-utils';
 
 describe('🔄 Backwards Compatibility Tests', () => {
   const testAssetsDir = join(__dirname, 'test-assets-01-backwards');
@@ -40,7 +41,7 @@ describe('🔄 Backwards Compatibility Tests', () => {
   });
 
   beforeEach(() => {
-    console.log('🧪 Testing backwards compatibility...');
+    debug('Testing backwards compatibility...');
   });
 
   describe('getEntries() API Compatibility', () => {
@@ -130,7 +131,7 @@ describe('🔄 Backwards Compatibility Tests', () => {
         expect(refactoredResult).toHaveLength(legacyResult.length);
       } else {
         // One threw error, one didn't - this is the inconsistency we're avoiding
-        console.warn(
+        warn(
           `Inconsistent behavior for ${invalidPath}: legacy error=${!!legacyError}, refactored error=${!!refactoredError}`
         );
       }
@@ -404,14 +405,12 @@ describe('🔄 Backwards Compatibility Tests', () => {
   });
 
   test('✅ Backwards Compatibility Summary', () => {
-    console.log('');
-    console.log('🎉 Backwards Compatibility Tests Complete!');
-    console.log('✅ AdvZlib maintains 100% API compatibility');
-    console.log('✅ All public methods behave identically to legacy implementation');
-    console.log('✅ Error handling matches legacy behavior');
-    console.log('✅ Edge cases handled consistently');
-    console.log('📦 Basic test assets used for focused compatibility testing');
-    console.log('');
+    info('Backwards Compatibility Tests Complete!');
+    info('AdvZlib maintains 100% API compatibility');
+    info('All public methods behave identically to legacy implementation');
+    info('Error handling matches legacy behavior');
+    info('Edge cases handled consistently');
+    info('Basic test assets used for focused compatibility testing');
   });
 });
 

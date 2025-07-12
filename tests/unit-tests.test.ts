@@ -3,6 +3,7 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import AdvZlib from '../src/index';
 import { createBasicTestZipFiles, BasicTestAssets } from './test-assets';
+import { info } from './test-utils';
 
 describe('🧩 Unit Tests', () => {
   const testAssetsDir = join(__dirname, 'test-assets-03-unit');
@@ -437,13 +438,11 @@ describe('🧩 Unit Tests', () => {
   });
 
   test('✅ Unit Tests Summary', () => {
-    console.log('');
-    console.log('🎉 Unit Tests Complete!');
-    console.log('✅ All major classes tested thoroughly');
-    console.log('✅ Cache mechanisms working correctly');
-    console.log('✅ Error handling behaves as expected');
-    console.log('✅ Memory management respects limits');
-    console.log('✅ Path resolution handles all scenarios');
-    console.log('');
+    info('Unit Tests Complete!');
+    info('All major classes tested thoroughly');
+    info('Cache mechanisms working correctly');
+    info('Error handling behaves as expected');
+    info('Memory management respects limits');
+    info('Path resolution handles all scenarios');
   });
 });
