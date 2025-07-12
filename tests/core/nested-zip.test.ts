@@ -2,7 +2,13 @@ import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import AdvZlib from '../../src/index';
-import { createBasicTestZipFiles, createPerformanceTestZipFiles, BasicTestAssets, PerformanceTestAssets, safeRemoveDir } from '../test-assets';
+import {
+  createBasicTestZipFiles,
+  createPerformanceTestZipFiles,
+  BasicTestAssets,
+  PerformanceTestAssets,
+  safeRemoveDir,
+} from '../test-assets';
 
 describe('Nested ZIP Handling', () => {
   const testAssetsDir = join(__dirname, '../test-assets-nested');
@@ -131,6 +137,8 @@ describe('Nested ZIP Handling', () => {
 
   describe('Cache Efficiency for Nested ZIPs', () => {
     test('should cache intermediate ZIPs for better performance', async () => {
+      await advZlib.cleanup();
+
       // Access a nested file to populate cache
       const nestedFile = join(basicAssets.nested, 'inner.zip', 'inner.txt');
 
@@ -152,6 +160,7 @@ describe('Nested ZIP Handling', () => {
     });
 
     test('should cache content across nested ZIP accesses', async () => {
+      await advZlib.cleanup();
       const nestedFile = join(basicAssets.nested, 'inner.zip', 'inner.txt');
 
       // Read multiple times to test content caching
@@ -166,6 +175,8 @@ describe('Nested ZIP Handling', () => {
     });
 
     test('should maintain cache efficiency with multiple nested accesses', async () => {
+      await advZlib.cleanup();
+
       const files = [
         join(basicAssets.nested, 'inner.zip', 'inner.txt'),
         join(perfAssets.deepNested, 'level2.zip', 'level3.zip', 'inner.txt'),
