@@ -2,7 +2,7 @@ import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import AdvZlib from '../../src/index';
-import { createBasicTestZipFiles, BasicTestAssets } from '../test-assets';
+import { createBasicTestZipFiles, BasicTestAssets, safeRemoveDir } from '../test-assets';
 
 describe('Edge Cases and Error Handling', () => {
   const testAssetsDir = join(__dirname, '../test-assets-edge-cases');
@@ -27,7 +27,7 @@ describe('Edge Cases and Error Handling', () => {
 
   afterAll(async () => {
     await advZlib.cleanup();
-    await fs.rm(testAssetsDir, { recursive: true, force: true });
+    await safeRemoveDir(testAssetsDir);
   });
 
   describe('Invalid Input Handling', () => {

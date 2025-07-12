@@ -625,14 +625,33 @@ async function createLargeInnerZip(outputPath: string): Promise<void> {
 // ===== UTILITY FUNCTIONS =====
 
 /**
- * Cleanup utility to remove test assets
+ * Windows-safe cleanup utility to remove test assets with retry logic
  */
 export async function cleanupTestAssets(assetsDir: string): Promise<void> {
-  try {
-    await fs.rm(assetsDir, { recursive: true, force: true });
-  } catch (error) {
-    // Ignore cleanup errors
-    console.warn('Failed to cleanup test assets:', error);
+  await safeRemoveDir(assetsDir);
+}
+
+/**
+ * Safe directory removal with Windows-specific retry logic for ENOTEMPTY errors
+ */
+export async function safeRemoveDir(dirPath: string, maxRetries: number = 3, delayMs: number = 100): Promise<void> {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await fs.rm(dirPath, { recursive: true, force: true });
+      return; // Success - exit early
+    } catch (error: any) {
+      const isLastAttempt = attempt === maxRetries;
+      const isWindowsError = error?.code === 'ENOTEMPTY' || error?.code === 'EBUSY' || error?.code === 'EPERM';
+      
+      if (isLastAttempt || !isWindowsError) {
+        // Log warning but don't throw - test cleanup failures shouldn't break tests
+        console.warn(`Failed to cleanup directory ${dirPath} after ${attempt} attempts:`, error?.message || error);
+        return;
+      }
+      
+      // Wait before retry
+      await new Promise(resolve => setTimeout(resolve, delayMs * attempt));
+    }
   }
 }
 

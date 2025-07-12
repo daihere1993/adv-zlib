@@ -2,7 +2,7 @@ import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import AdvZlib from '../../src/index';
-import { createBasicTestZipFiles, BasicTestAssets } from '../test-assets';
+import { createBasicTestZipFiles, BasicTestAssets, safeRemoveDir } from '../test-assets';
 
 describe('AdvZlib Core API', () => {
   const testAssetsDir = join(__dirname, '../test-assets-api');
@@ -27,7 +27,7 @@ describe('AdvZlib Core API', () => {
 
   afterAll(async () => {
     await advZlib.cleanup();
-    await fs.rm(testAssetsDir, { recursive: true, force: true });
+    await safeRemoveDir(testAssetsDir);
   });
 
   describe('exists()', () => {

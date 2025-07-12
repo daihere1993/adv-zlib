@@ -2,6 +2,7 @@ import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import AdvZlib from '../../src/index';
+import { safeRemoveDir } from '../test-assets';
 
 describe('Real-World Integration Tests', () => {
   const assetsDir = join(__dirname, '../assets');
@@ -172,7 +173,7 @@ describe('Real-World Integration Tests', () => {
           expect(dirExists).toBe(true);
         }
       } finally {
-        await fs.rm(outputDir, { recursive: true, force: true });
+        await safeRemoveDir(outputDir);
       }
     });
 
@@ -200,7 +201,7 @@ describe('Real-World Integration Tests', () => {
         const extracted = await advZlib.extract(zipPath, outputDir);
         expect(extracted).toHaveLength(0);
       } finally {
-        await fs.rm(outputDir, { recursive: true, force: true });
+        await safeRemoveDir(outputDir);
       }
     });
 

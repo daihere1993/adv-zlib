@@ -2,7 +2,7 @@ import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import AdvZlib from '../../src/index';
-import { createBasicTestZipFiles, createPerformanceTestZipFiles, BasicTestAssets, PerformanceTestAssets } from '../test-assets';
+import { createBasicTestZipFiles, createPerformanceTestZipFiles, BasicTestAssets, PerformanceTestAssets, safeRemoveDir } from '../test-assets';
 
 describe('Memory Usage Tests', () => {
   const testAssetsDir = join(__dirname, '../test-assets-memory');
@@ -25,7 +25,7 @@ describe('Memory Usage Tests', () => {
   }, 60000);
 
   afterAll(async () => {
-    await fs.rm(testAssetsDir, { recursive: true, force: true });
+    await safeRemoveDir(testAssetsDir);
   });
 
   describe('Memory Limit Enforcement', () => {

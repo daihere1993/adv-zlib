@@ -2,7 +2,7 @@ import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import AdvZlib from '../../src/index';
-import { createBasicTestZipFiles, createPerformanceTestZipFiles, BasicTestAssets, PerformanceTestAssets } from '../test-assets';
+import { createBasicTestZipFiles, createPerformanceTestZipFiles, BasicTestAssets, PerformanceTestAssets, safeRemoveDir } from '../test-assets';
 
 describe('Nested ZIP Handling', () => {
   const testAssetsDir = join(__dirname, '../test-assets-nested');
@@ -32,8 +32,10 @@ describe('Nested ZIP Handling', () => {
   }, 60000);
 
   afterAll(async () => {
-    await advZlib.cleanup();
-    await fs.rm(testAssetsDir, { recursive: true, force: true });
+    if (advZlib) {
+      await advZlib.cleanup();
+    }
+    await safeRemoveDir(testAssetsDir);
   });
 
   describe('2-Level Nesting', () => {
