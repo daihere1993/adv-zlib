@@ -21,7 +21,11 @@
     "build:esm": "tsc --project tsconfig.esm.json",
     "build:cjs": "tsc --project tsconfig.cjs.json && node scripts/rename-cjs.js",
     "test-dual-module": "node scripts/test-dual-module.js",
-    "test": "vitest",
+    "test": "vitest --no-watch",
+    "test:core": "vitest tests/core --no-watch",
+    "test:performance": "vitest tests/performance --no-watch",
+    "test:integration": "vitest tests/integration --no-watch",
+    "test:watch": "vitest --watch",
     "coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit"
   },

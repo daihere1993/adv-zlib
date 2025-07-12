@@ -1,7 +1,11 @@
 import { promises as fs, createWriteStream } from 'fs';
 import { join } from 'path';
 import archiver from 'archiver';
-import { debug, info, warn, error } from './test-utils';
+// Simple logging functions for test asset creation
+const debug = (msg: string) => process.env.TEST_VERBOSE && console.debug(`[DEBUG] ${msg}`);
+const info = (msg: string) => console.info(`[INFO] ${msg}`);
+const warn = (msg: string) => console.warn(`[WARN] ${msg}`);
+const logError = (msg: string, ...args: any[]) => console.error(`[ERROR] ${msg}`, ...args);
 
 // ===== BASIC TEST ASSETS =====
 // These are lightweight assets for functional and backwards compatibility testing
@@ -115,7 +119,7 @@ export async function createPerformanceTestZipFiles(assetsDir: string): Promise<
       warn(`Large nested ZIP seems unusually small: ${(largeNestedStats.size / 1024).toFixed(1)}KB`);
     }
   } catch (error) {
-    error(`Failed to verify large nested ZIP creation:`, error);
+    logError(`Failed to verify large nested ZIP creation:`, error);
     throw error;
   }
 
@@ -482,7 +486,7 @@ async function createLargeNestedZip(outputPath: string, tempDir: string): Promis
     const innerStats = await fs.stat(largeInnerZipPath);
     debug(`Large inner ZIP created: ${(innerStats.size / 1024 / 1024).toFixed(1)}MB`);
   } catch (error) {
-          error(`Failed to create large inner ZIP:`, error);
+          logError(`Failed to create large inner ZIP:`, error);
     throw error;
   }
 
@@ -512,7 +516,7 @@ async function createLargeNestedZip(outputPath: string, tempDir: string): Promis
     });
     
           archive.on('error', (err) => {
-        error(`Archive error during large nested ZIP creation:`, err);
+        logError(`Archive error during large nested ZIP creation:`, err);
         reject(err);
       });
 
@@ -563,12 +567,12 @@ async function createLargeInnerZip(outputPath: string): Promise<void> {
     });
     
           output.on('error', (err) => {
-        error(`Output stream error:`, err);
+        logError(`Output stream error:`, err);
         reject(err);
       });
     
           archive.on('error', (err) => {
-        error(`Archive error during large inner ZIP creation:`, err);
+        logError(`Archive error during large inner ZIP creation:`, err);
         reject(err);
       });
 
@@ -612,7 +616,7 @@ async function createLargeInnerZip(outputPath: string): Promise<void> {
       debug(`Finalizing large inner ZIP... (${totalSizeAdded.toFixed(1)}MB content added)`);
       archive.finalize();
           } catch (err) {
-        error(`Error during large inner ZIP creation:`, err);
+        logError(`Error during large inner ZIP creation:`, err);
         reject(err);
       }
   });
