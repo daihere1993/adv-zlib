@@ -1117,6 +1117,26 @@ export class AdvZlib {
   }
 
   /**
+   * Normalize path separators to forward slashes for consistent handling
+   * This ensures Windows paths work correctly with the ZIP path logic
+   * @param path The path to normalize
+   * @returns Path with normalized separators
+   */
+  private normalizePath(path: string): string {
+    return path.replace(/\\/g, '/');
+  }
+
+  /**
+   * Split a path into segments, handling both forward slashes and backslashes
+   * @param path The path to split
+   * @returns Array of path segments
+   */
+  private splitPath(path: string): string[] {
+    // First normalize the path, then split on forward slashes
+    return this.normalizePath(path).split('/').filter(Boolean);
+  }
+
+  /**
    * Get the list of entries in a ZIP file
    * @param src The path of the zip file which can be:
    * - Normal: `/a/b.zip`
@@ -1326,8 +1346,8 @@ export class AdvZlib {
    */
   private matchEntryByFullPath(entry: ZipEntry, src: string): boolean {
     // Normalize path separators to forward slashes
-    const entryFullPath = entry.fullPath.replace(/\\/g, '/');
-    const srcPath = src.replace(/\\/g, '/');
+    const entryFullPath = this.normalizePath(entry.fullPath);
+    const srcPath = this.normalizePath(src);
 
     // Handle exact matches
     if (entryFullPath === srcPath) {
@@ -1369,14 +1389,17 @@ export class AdvZlib {
    * @returns The last entry relative path
    */
   private getLastEntryRelPath(src: string, includeZip = false): string {
+    // Normalize the source path first
+    const normalizedSrc = this.normalizePath(src);
+    
     // Find the last ZIP file in the path
-    const lastZipPath = this.findLastZipPath(src);
+    const lastZipPath = this.findLastZipPath(normalizedSrc);
     if (!lastZipPath) {
       return '';
     }
 
     // Extract the path after the last ZIP file
-    const afterZipPath = src.substring(lastZipPath.length);
+    const afterZipPath = normalizedSrc.substring(lastZipPath.length);
 
     // Remove leading slashes and return the relative path
     const entryRelPath = afterZipPath.replace(/^[/\\]+/, '');
@@ -1485,7 +1508,9 @@ export class AdvZlib {
         } else {
           // Nested ZIP file - find entry in parent ZIP
           // Calculate the relative path from the previous ZIP to this ZIP
-          const relativePathInParent = segment.substring(previousZipPath.length + 1); // +1 to remove the leading slash
+          const normalizedSegment = this.normalizePath(segment);
+          const normalizedPreviousZipPath = this.normalizePath(previousZipPath);
+          const relativePathInParent = normalizedSegment.substring(normalizedPreviousZipPath.length + 1); // +1 to remove the leading slash
           const zipEntry = currentCentralDir.entries.find((entry) => entry.relPath === relativePathInParent);
 
           if (!zipEntry) {
@@ -1532,15 +1557,18 @@ export class AdvZlib {
    * '/a/b.zip/c.zip/d.zip/e.txt' -> '/a/b.zip/c.zip/d.zip'
    * '/a/b/c.txt' -> null
    * '/a/b.zip/folder/' -> '/a/b.zip'
+   * 'C:\\a\\b.zip' -> 'C:/a/b.zip' (Windows paths)
+   * 'C:\\a\\b.zip\\c.zip' -> 'C:/a/b.zip/c.zip' (Windows paths)
    */
   private findLastZipPath(source: string): string | null {
-    const segments = source.split('/').filter(Boolean);
+    const normalizedSource = this.normalizePath(source);
+    const segments = this.splitPath(normalizedSource);
     let lastZipPath = '';
     let foundLastZip = false;
 
     for (let i = 0; i < segments.length; i++) {
       const segment = segments[i];
-      lastZipPath += (i === 0 && source.startsWith('/') ? '/' : i > 0 ? '/' : '') + segment;
+      lastZipPath += (i === 0 && normalizedSource.startsWith('/') ? '/' : i > 0 ? '/' : '') + segment;
 
       if (this.isZipFile(segment)) {
         foundLastZip = true;
@@ -1579,12 +1607,15 @@ export class AdvZlib {
    * '/a/b/c.txt' -> []
    * '' -> []
    * '/a/b.zip/folder/c.zip/file.txt' -> ['/a/b.zip', '/a/b.zip/folder/c.zip']
+   * 'C:\\a\\b.zip' -> ['C:/a/b.zip'] (Windows paths)
+   * 'C:\\a\\b.zip\\c.zip' -> ['C:/a/b.zip', 'C:/a/b.zip/c.zip'] (Windows paths)
    */
   private extractZipSegments(source: string): string[] {
-    const segments = source.split('/').filter(Boolean);
+    const normalizedSource = this.normalizePath(source);
+    const segments = this.splitPath(normalizedSource);
     const result: string[] = [];
     let currentPath = '';
-    const isAbsolute = source.startsWith('/');
+    const isAbsolute = normalizedSource.startsWith('/');
 
     for (const segment of segments) {
       if (currentPath === '') {
