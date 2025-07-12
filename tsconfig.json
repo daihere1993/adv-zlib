@@ -15,5 +15,5 @@
     }
   },
   "include": ["src/**/*"],            // Include all files in the src folder
-  "exclude": ["node_modules", "dist", "tests"] // Exclude node_modules and build output
+  "exclude": ["node_modules", "dist", "tests", "src/refactor"] // Exclude node_modules and build output
 }

@@ -1,6 +1,6 @@
 {
   "name": "adv-zlib",
-  "version": "0.2.2",
+  "version": "0.2.4",
   "description": "The go-to package for working with large and nested ZIP files — fast, efficient, and effortlessly.",
   "type": "module",
   "main": "./dist/cjs/index.cjs",
@@ -12,7 +12,8 @@
   "exports": {
     ".": {
       "require": "./dist/cjs/index.cjs",
-      "import": "./dist/esm/index.js"
+      "import": "./dist/esm/index.js",
+      "types": "./dist/types/index.d.ts"
     }
   },
   "scripts": {
@@ -20,17 +21,24 @@
     "build:esm": "tsc --project tsconfig.esm.json",
     "build:cjs": "tsc --project tsconfig.cjs.json && node scripts/rename-cjs.js",
     "test-dual-module": "node scripts/test-dual-module.js",
-    "test": "vitest",
+    "test": "vitest --no-watch",
+    "test:core": "vitest tests/core --no-watch",
+    "test:performance": "vitest tests/performance --no-watch",
+    "test:integration": "vitest tests/integration --no-watch",
+    "test:watch": "vitest --watch",
     "coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@types/archiver": "^6.0.3",
     "@types/node": "^20.17.12",
+    "@types/yauzl": "^2.10.0",
     "@vitest/coverage-v8": "^3.0.4",
+    "adv-zlib": "v0.2.4",
     "archiver": "^7.0.1",
     "typescript": "^5.3.3",
-    "vitest": "^3.0.4"
+    "vitest": "^3.0.4",
+    "yauzl": "^3.2.0"
   },
   "engines": {
     "node": ">=16"

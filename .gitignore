@@ -1,6 +1,7 @@
 
 # assets
 assets/
+test-assets*
 
 # Dependencies
 node_modules/
