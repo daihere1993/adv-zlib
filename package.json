@@ -1,6 +1,6 @@
 {
   "name": "adv-zlib",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "The go-to package for working with large and nested ZIP files — fast, efficient, and effortlessly.",
   "type": "module",
   "main": "./dist/cjs/index.cjs",
