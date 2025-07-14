@@ -69,7 +69,7 @@ jobs:
           
           # Commit and push
           git add package.json
-          git commit -m "chore: bump version to $NEW_VERSION"
+          git commit -m "chore: bump version to $NEW_VERSION [skip ci]"
           git push origin main
 
       - name: Create summary
