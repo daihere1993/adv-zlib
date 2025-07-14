@@ -4,10 +4,21 @@ on:
   pull_request:
     types: [closed]
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump_type:
+        description: 'Version bump type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 
 jobs:
   version-bump:
-    if: github.event.pull_request.merged == true
+    if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     
     steps:
@@ -35,21 +46,26 @@ jobs:
       - name: Determine version bump type
         id: bump-type
         run: |
-          PR_TITLE="${{ github.event.pull_request.title }}"
-          PR_LABELS="${{ join(github.event.pull_request.labels.*.name, ' ') }}"
-          
-          # Check for breaking changes
-          if [[ "$PR_TITLE" =~ ^(feat!|fix!|BREAKING) ]] || [[ "$PR_LABELS" =~ breaking ]]; then
-            echo "bump=major" >> $GITHUB_OUTPUT
-            echo "Detected breaking change - major version bump"
-          # Check for features
-          elif [[ "$PR_TITLE" =~ ^feat ]] || [[ "$PR_LABELS" =~ feature ]]; then
-            echo "bump=minor" >> $GITHUB_OUTPUT
-            echo "Detected feature - minor version bump"
-          # Default to patch for fixes, chores, etc.
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "bump=${{ inputs.bump_type }}" >> $GITHUB_OUTPUT
+            echo "Manual trigger - ${{ inputs.bump_type }} version bump"
           else
-            echo "bump=patch" >> $GITHUB_OUTPUT
-            echo "Default patch version bump"
+            PR_TITLE="${{ github.event.pull_request.title }}"
+            PR_LABELS="${{ join(github.event.pull_request.labels.*.name, ' ') }}"
+            
+            # Check for breaking changes
+            if [[ "$PR_TITLE" =~ ^(feat!|fix!|BREAKING) ]] || [[ "$PR_LABELS" =~ breaking ]]; then
+              echo "bump=major" >> $GITHUB_OUTPUT
+              echo "Detected breaking change - major version bump"
+            # Check for features
+            elif [[ "$PR_TITLE" =~ ^feat ]] || [[ "$PR_LABELS" =~ feature ]]; then
+              echo "bump=minor" >> $GITHUB_OUTPUT
+              echo "Detected feature - minor version bump"
+            # Default to patch for fixes, chores, etc.
+            else
+              echo "bump=patch" >> $GITHUB_OUTPUT
+              echo "Default patch version bump"
+            fi
           fi
 
       - name: Bump version
