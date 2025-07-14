@@ -47,7 +47,7 @@ describe('AdvZlib AES Encryption Support', () => {
   }> {
     const testFiles = [
       { name: 'secret.txt', content: 'This is AES encrypted secret content!' },
-      { name: 'passwords.txt', content: 'admin:aes123\\nuser:secret789' },
+      { name: 'passwords.txt', content: 'admin:aes123\nuser:secret789' },
       { name: 'data/config.json', content: '{"apiKey": "aes-secret-key-456", "encryption": "AES"}' },
     ];
 
@@ -154,10 +154,19 @@ describe('AdvZlib AES Encryption Support', () => {
       expect(content1.toString()).toBe('This is AES encrypted secret content!');
 
       const content2 = await advZlib.read(join(aesAssets.aes256, 'passwords.txt'), options);
-      expect(content2.toString()).toBe('admin:aes123\\nuser:secret789');
+      expect(content2.toString()).toBe('admin:aes123\nuser:secret789');
 
       const content3 = await advZlib.read(join(aesAssets.aes256, 'data/config.json'), options);
-      expect(JSON.parse(content3.toString())).toEqual({
+      const jsonString = content3.toString();
+      
+      let jsonData;
+      try {
+        jsonData = JSON.parse(jsonString);
+      } catch (error) {
+        throw new Error(`Failed to parse JSON from config.json. Content: "${jsonString}", Error: ${error.message}`);
+      }
+      
+      expect(jsonData).toEqual({
         apiKey: 'aes-secret-key-456',
         encryption: 'AES',
       });
