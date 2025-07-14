@@ -712,6 +712,9 @@ async function createEncryptedZipBuffer(
     const content = Buffer.isBuffer(file.content) ? file.content : Buffer.from(file.content, 'utf8');
     const fileName = Buffer.from(file.name, 'utf8');
     
+    // Debug: Log each file being processed
+    console.log(`Processing file: "${file.name}" -> fileName buffer length: ${fileName.length}`);
+    
     // Calculate CRC32
     const crc32 = calculateCRC32(content);
     

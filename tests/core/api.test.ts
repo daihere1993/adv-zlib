@@ -199,17 +199,45 @@ describe('AdvZlib Core API', () => {
 
   describe('Cache Integration', () => {
     test('should improve performance with caching', async () => {
-      // First access - cold cache
-      const start1 = Date.now();
-      await advZlib.getEntries(basicAssets.simpleText);
-      const coldTime = Date.now() - start1;
+      // Use a unique file path to avoid cache contamination from other tests
+      const uniqueFilePath = basicAssets.withDirectories;
 
-      // Second access - warm cache
-      const start2 = Date.now();
-      await advZlib.getEntries(basicAssets.simpleText);
-      const warmTime = Date.now() - start2;
+      // Ensure clean cache state for this test
+      await advZlib.cleanup();
+      await new Promise((resolve) => setTimeout(resolve, 5));
 
-      expect(warmTime).toBeLessThanOrEqual(coldTime);
+      // Verify cache is empty before test
+      const initialStats = advZlib.getCacheStats();
+      expect(initialStats.centralDir.entries).toBe(0);
+
+      // First access (cold cache) - should read from disk
+      const start1 = process.hrtime.bigint();
+      const entries1 = await advZlib.getEntries(uniqueFilePath);
+      const end1 = process.hrtime.bigint();
+      const coldTime = Number(end1 - start1) / 1000000; // Convert to milliseconds
+
+      // Verify content was cached after first read
+      const afterFirstStats = advZlib.getCacheStats();
+      expect(afterFirstStats.centralDir.entries).toBeGreaterThan(0);
+
+      // Multiple warm cache reads to ensure consistency
+      const warmReads = 3;
+      const warmTimes: number[] = [];
+
+      for (let i = 0; i < warmReads; i++) {
+        const start = process.hrtime.bigint();
+        const entries = await advZlib.getEntries(uniqueFilePath);
+        const end = process.hrtime.bigint();
+
+        expect(entries.length).toBe(entries1.length);
+        warmTimes.push(Number(end - start) / 1000000); // Convert to milliseconds
+      }
+
+      // Check cache performance - warm reads should be faster than cold read
+      const avgWarmTime = warmTimes.reduce((a, b) => a + b, 0) / warmTimes.length;
+      
+      expect(avgWarmTime).toBeLessThan(coldTime);
+      expect(entries1.length).toBeGreaterThan(0);
     });
 
     test('should show cache statistics', () => {
