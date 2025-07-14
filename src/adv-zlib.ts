@@ -4,7 +4,7 @@ import { PassThrough, Readable } from 'stream';
 import { pipeline } from 'node:stream/promises';
 import * as path from 'node:path';
 import * as zlib from 'node:zlib';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash, createDecipheriv, pbkdf2Sync, createHmac } from 'node:crypto';
 import { tmpdir } from 'node:os';
 
 // =============================================================================
@@ -23,6 +23,84 @@ export interface AdvZlibOptions {
   maxContentCacheMemoryMB?: number;
   maxContentCacheFileSizeMB?: number; // Max file size to cache in memory
   cacheBaseDir?: string; // Directory for disk cache
+}
+
+/**
+ * Options for ZIP operations that may involve encryption
+ */
+export interface ZipOptions {
+  password?: string;
+}
+
+/**
+ * Options for getEntries operation
+ */
+export interface GetEntriesOptions extends ZipOptions {
+  filter?: (entry: ZipEntry) => boolean;
+}
+
+/**
+ * Options for read operation
+ */
+export interface ReadOptions extends ZipOptions {
+  filter?: (entry: ZipEntry) => boolean;
+}
+
+/**
+ * Options for extract operation
+ */
+export interface ExtractOptions extends ZipOptions {
+  filter?: (entry: ZipEntry) => boolean;
+}
+
+/**
+ * Options for exists operation
+ */
+export interface ExistsOptions extends ZipOptions {}
+
+/**
+ * Information about encryption in a ZIP entry
+ */
+export interface EncryptionInfo {
+  isEncrypted: boolean;
+  encryptionMethod: 'none' | 'traditional' | 'aes-128' | 'aes-192' | 'aes-256' | 'unknown';
+  needsPassword: boolean;
+}
+
+/**
+ * Encryption method enumeration
+ */
+export enum EncryptionMethod {
+  NONE = 'none',
+  TRADITIONAL = 'traditional',
+  AES_128 = 'aes-128',
+  AES_192 = 'aes-192',
+  AES_256 = 'aes-256',
+  UNKNOWN = 'unknown',
+}
+
+/**
+ * Custom error types for encryption operations
+ */
+export class EncryptionError extends Error {
+  constructor(message: string, public encryptionMethod?: string) {
+    super(message);
+    this.name = 'EncryptionError';
+  }
+}
+
+export class InvalidPasswordError extends EncryptionError {
+  constructor(encryptionMethod?: string) {
+    super(`Invalid password for ${encryptionMethod || 'encrypted'} content`, encryptionMethod);
+    this.name = 'InvalidPasswordError';
+  }
+}
+
+export class UnsupportedEncryptionError extends EncryptionError {
+  constructor(encryptionMethod: string) {
+    super(`Unsupported encryption method: ${encryptionMethod}`, encryptionMethod);
+    this.name = 'UnsupportedEncryptionError';
+  }
 }
 
 /**
@@ -244,7 +322,9 @@ class DecompressedContentCache {
 
       try {
         const diskContent = await fs.readFile(entry.diskPath);
-        this.logger.debug(`[DecompressedContentCache] Cache hit (disk) for ${entryRelPath} (${(entry.diskSize / 1024).toFixed(1)}KB)`);
+        this.logger.debug(
+          `[DecompressedContentCache] Cache hit (disk) for ${entryRelPath} (${(entry.diskSize / 1024).toFixed(1)}KB)`
+        );
         return diskContent;
       } catch (error) {
         this.logger.warn(`[DecompressedContentCache] Failed to read disk cache for ${key}: ${error}`);
@@ -253,7 +333,9 @@ class DecompressedContentCache {
       }
     } else {
       // Read from memory
-      this.logger.debug(`[DecompressedContentCache] Cache hit (memory) for ${entryRelPath} (${(entry.memorySize / 1024).toFixed(1)}KB)`);
+      this.logger.debug(
+        `[DecompressedContentCache] Cache hit (memory) for ${entryRelPath} (${(entry.memorySize / 1024).toFixed(1)}KB)`
+      );
       return entry.content || null;
     }
   }
@@ -273,7 +355,7 @@ class DecompressedContentCache {
     if (shouldStoreOnDisk) {
       // Store on disk
       const diskPath = path.join(this.tempDir, `${randomUUID()}.cache`);
-      
+
       try {
         await fs.writeFile(diskPath, content);
         this.diskCacheFiles.add(diskPath);
@@ -326,7 +408,7 @@ class DecompressedContentCache {
     const entry = this.cache.get(key);
     if (entry) {
       this.cache.delete(key);
-      
+
       if (entry.isOnDisk && entry.diskPath) {
         // Clean up disk file
         try {
@@ -390,7 +472,9 @@ class DecompressedContentCache {
         break; // No entries to evict
       }
 
-      this.logger.debug(`[DecompressedContentCache] Evicting LRU entry: ${oldestEntry.key} (${(oldestEntry.size / 1024).toFixed(1)}KB)`);
+      this.logger.debug(
+        `[DecompressedContentCache] Evicting LRU entry: ${oldestEntry.key} (${(oldestEntry.size / 1024).toFixed(1)}KB)`
+      );
       await this.delete(oldestEntry.key);
     }
   }
@@ -632,12 +716,17 @@ export class CentralDirFileHeader {
   public fileCommentLength!: number;
   public localFileHeaderOffset!: number;
   public fileName!: string;
+  public generalPurposeBitFlag!: number;
+  public encryptionInfo!: EncryptionInfo;
+  public dataBuffer!: Buffer; // Store the buffer for later access to extra fields
 
   constructor(data: Buffer) {
+    this.dataBuffer = data;
     if (data.readUInt32LE(0) !== CentralDirFileHeader.SIGNATURE) {
       throw new Error('Central Directory File Header: The signature is not correct');
     }
 
+    this.generalPurposeBitFlag = data.readUInt16LE(8);
     this.compressionMethod = data.readUInt16LE(10);
     this.compressedSize = data.readUInt32LE(20);
     this.fileNameLength = data.readUInt16LE(28);
@@ -654,6 +743,83 @@ export class CentralDirFileHeader {
     } else {
       this.fileName = '';
     }
+
+    // Parse encryption information
+    this.encryptionInfo = this.parseEncryptionInfo(data);
+  }
+
+  /**
+   * Parse encryption information from the CDFH
+   */
+  private parseEncryptionInfo(data: Buffer): EncryptionInfo {
+    const isTraditionalEncrypted = (this.generalPurposeBitFlag & 0x0001) !== 0;
+    const isStrongEncrypted = (this.generalPurposeBitFlag & 0x0040) !== 0;
+
+    if (!isTraditionalEncrypted && !isStrongEncrypted) {
+      return {
+        isEncrypted: false,
+        encryptionMethod: EncryptionMethod.NONE,
+        needsPassword: false,
+      };
+    }
+
+    if (isStrongEncrypted) {
+      // Parse extra fields for AES encryption information
+      const aesInfo = this.parseAESEncryption(data);
+      if (aesInfo) {
+        return aesInfo;
+      }
+    }
+
+    // Traditional encryption
+    return {
+      isEncrypted: true,
+      encryptionMethod: EncryptionMethod.TRADITIONAL,
+      needsPassword: true,
+    };
+  }
+
+  /**
+   * Parse AES encryption from extra fields
+   */
+  private parseAESEncryption(data: Buffer): EncryptionInfo | null {
+    if (this.extraFieldLength === 0) {
+      return null;
+    }
+
+    const extraFieldStart = CentralDirFileHeader.MIN_SIZE + this.fileNameLength;
+    const extraFieldEnd = extraFieldStart + this.extraFieldLength;
+
+    if (data.length < extraFieldEnd) {
+      return null;
+    }
+
+    let offset = extraFieldStart;
+
+    while (offset < extraFieldEnd - 4) {
+      const headerID = data.readUInt16LE(offset);
+      const dataSize = data.readUInt16LE(offset + 2);
+
+      // AES extra field header ID (0x9901)
+      if (headerID === 0x9901 && dataSize >= 7) {
+        const keySize = data.readUInt16LE(offset + 8); // AES key size
+
+        switch (keySize) {
+          case 1:
+            return { isEncrypted: true, encryptionMethod: EncryptionMethod.AES_128, needsPassword: true };
+          case 2:
+            return { isEncrypted: true, encryptionMethod: EncryptionMethod.AES_192, needsPassword: true };
+          case 3:
+            return { isEncrypted: true, encryptionMethod: EncryptionMethod.AES_256, needsPassword: true };
+          default:
+            return { isEncrypted: true, encryptionMethod: EncryptionMethod.UNKNOWN, needsPassword: true };
+        }
+      }
+
+      offset += 4 + dataSize;
+    }
+
+    return { isEncrypted: true, encryptionMethod: EncryptionMethod.UNKNOWN, needsPassword: true };
   }
 }
 
@@ -813,6 +979,7 @@ export class FileData {
 enum CompressionMethod {
   NONE = 0,
   DEFLATED = 8,
+  AES = 99,
 }
 
 /**
@@ -851,6 +1018,14 @@ export class ZipEntry {
    * Whether the entry is a directory.
    */
   public isDirectory!: boolean;
+  /**
+   * Whether the entry is encrypted.
+   */
+  public isEncrypted!: boolean;
+  /**
+   * Encryption information for this entry.
+   */
+  public encryptionInfo!: EncryptionInfo;
 
   private source!: FileHandle | Buffer;
   private fileData?: FileData; // Make optional for lazy initialization
@@ -875,6 +1050,8 @@ export class ZipEntry {
     this.size = cdfh.compressedSize;
     this.fullPath = path.join(outerZipPath, this.relPath);
     this.isDirectory = this.relPath.endsWith('/') || this.relPath.endsWith('\\');
+    this.isEncrypted = cdfh.encryptionInfo.isEncrypted;
+    this.encryptionInfo = cdfh.encryptionInfo;
     this.contentCache = contentCache;
     this.zipPath = zipPath;
     this.zipMtime = zipMtime;
@@ -910,25 +1087,52 @@ export class ZipEntry {
    * 1. If is non-zip entry, return the data directly
    * 2. If is zip entry, return the data after decompressing
    * 3. Use content cache if available for performance optimization
+   * 4. Handle encrypted entries with password-based decryption
    */
-  public async read(): Promise<Buffer> {
+  public async read(password?: string): Promise<Buffer> {
     // Initialize only when actually reading content
     await this.init();
 
-    // Try content cache first if available
+    // Check if encrypted entry requires password
+    if (this.isEncrypted && !password) {
+      throw new Error(`Entry '${this.relPath}' is encrypted and requires a password`);
+    }
+
+    // Try content cache first if available (include password in cache key for encrypted files)
+    const cacheKey =
+      this.isEncrypted && password
+        ? `${this.zipPath}:${this.relPath}:${createHash('sha256').update(password).digest('hex').substring(0, 16)}`
+        : `${this.zipPath}:${this.relPath}`;
+
     if (this.contentCache && this.zipPath && this.zipMtime !== undefined) {
-      const cachedContent = await this.contentCache.get(this.zipPath, this.zipMtime, this.relPath, this.fileData!.lfh.crc32 || 0);
+      const cachedContent = await this.contentCache.get(this.zipPath, this.zipMtime, cacheKey, this.fileData!.lfh.crc32 || 0);
 
       if (cachedContent) {
         return cachedContent;
       }
     }
 
-    // Cache miss or no cache - perform normal read/decompression
-    const rawData = await this.fileData!.extractData(this.source);
+    // Cache miss or no cache - perform normal read/decompression/decryption
+    let rawData = await this.fileData!.extractData(this.source);
+
+    // Handle decryption first if needed
+    if (this.isEncrypted && password) {
+      rawData = await this.decryptData(rawData, password);
+    }
+
     let finalData: Buffer;
 
-    if (this.cdfh.compressionMethod === CompressionMethod.NONE) {
+    if (this.cdfh.compressionMethod === CompressionMethod.AES) {
+      // For AES files, after decryption, apply the actual compression method
+      const actualCompressionMethod = this.getActualCompressionMethod();
+      if (actualCompressionMethod === CompressionMethod.NONE) {
+        finalData = rawData;
+      } else if (actualCompressionMethod === CompressionMethod.DEFLATED) {
+        finalData = await this.inflateCompressedData(rawData);
+      } else {
+        throw new Error(`Unsupported actual compression method in AES file: ${actualCompressionMethod}`);
+      }
+    } else if (this.cdfh.compressionMethod === CompressionMethod.NONE) {
       finalData = rawData;
     } else if (this.cdfh.compressionMethod === CompressionMethod.DEFLATED) {
       finalData = await this.inflateCompressedData(rawData);
@@ -938,7 +1142,7 @@ export class ZipEntry {
 
     // Cache the result if cache is available and not a directory
     if (this.contentCache && this.zipPath && this.zipMtime !== undefined && !this.isDirectory) {
-      await this.contentCache.set(this.zipPath, this.zipMtime, this.relPath, this.fileData!.lfh.crc32 || 0, finalData);
+      await this.contentCache.set(this.zipPath, this.zipMtime, cacheKey, this.fileData!.lfh.crc32 || 0, finalData);
     }
 
     return finalData;
@@ -949,7 +1153,13 @@ export class ZipEntry {
     await this.init();
 
     const rawDataReadStream = await this.fileData!.createReadStream(this.source);
-    if (this.cdfh.compressionMethod === CompressionMethod.NONE) {
+    
+    if (this.cdfh.compressionMethod === CompressionMethod.AES) {
+      // For AES files, the stream needs special handling for decryption + decompression
+      // Since this method doesn't handle passwords, we'll return the raw stream
+      // The read() method handles AES decryption and decompression properly
+      return rawDataReadStream;
+    } else if (this.cdfh.compressionMethod === CompressionMethod.NONE) {
       return rawDataReadStream;
     } else if (this.cdfh.compressionMethod === CompressionMethod.DEFLATED) {
       return this.createInflateStream(rawDataReadStream);
@@ -958,7 +1168,12 @@ export class ZipEntry {
     }
   }
 
-  public async extract(dest: string): Promise<string> {
+  public async extract(dest: string, password?: string): Promise<string> {
+    // Check encryption requirements
+    if (this.isEncrypted && !password) {
+      throw new Error(`Entry '${this.relPath}' is encrypted and requires a password`);
+    }
+
     if (this.isDirectory) {
       // Create directory if it doesn't exist - use relPath to preserve directory structure
       const dirPath = path.join(dest, this.relPath);
@@ -973,31 +1188,61 @@ export class ZipEntry {
     // Initialize only when actually extracting
     await this.init();
 
+    const outputPath = this.determineOutputPath(dest);
+
+    // Handle encrypted files by reading with password first
+    if (this.isEncrypted && password) {
+      const content = await this.read(password);
+      await this.writeToFile(outputPath, content);
+      return outputPath;
+    }
+
+    // Regular stream-based extraction for non-encrypted files
+    return this.extractRegular(outputPath);
+  }
+
+  /**
+   * Determine the output path for extraction
+   */
+  private determineOutputPath(dest: string): string {
     try {
-      const stats = await stat(dest);
+      const stats = require('fs').statSync(dest);
       if (stats.isDirectory()) {
         // When extracting to a directory, use just the filename (not the full relPath)
         // This maintains backward compatibility for single file extractions
-        dest = path.join(dest, this.name);
+        return path.join(dest, this.name);
       }
       // If dest is a file path, use it as-is
+      return dest;
     } catch (error) {
       // dest is not a directory, treat as file path
-      // But we need to ensure the parent directory exists
-      const parentDir = path.dirname(dest);
-      await fs.mkdir(parentDir, { recursive: true });
+      return dest;
     }
+  }
 
+  /**
+   * Write content to file, ensuring parent directory exists
+   */
+  private async writeToFile(outputPath: string, content: Buffer): Promise<void> {
+    const parentDir = path.dirname(outputPath);
+    await fs.mkdir(parentDir, { recursive: true });
+    await fs.writeFile(outputPath, content);
+  }
+
+  /**
+   * Regular stream-based extraction for non-encrypted files
+   */
+  private async extractRegular(outputPath: string): Promise<string> {
     // Ensure parent directory exists for the destination file
-    const parentDir = path.dirname(dest);
+    const parentDir = path.dirname(outputPath);
     await fs.mkdir(parentDir, { recursive: true });
 
     const readStream = await this.createReadStream();
-    const writeStream = createWriteStream(dest);
+    const writeStream = createWriteStream(outputPath);
 
     await pipeline(readStream, writeStream);
 
-    return dest;
+    return outputPath;
   }
 
   private async inflateCompressedData(compressedData: Buffer): Promise<Buffer> {
@@ -1033,6 +1278,250 @@ export class ZipEntry {
     compressedStream.pipe(inflaterStream);
 
     return inflaterStream;
+  }
+
+  /**
+   * Decrypt encrypted ZIP data based on encryption method
+   */
+  private async decryptData(encryptedData: Buffer, password: string): Promise<Buffer> {
+    switch (this.encryptionInfo.encryptionMethod) {
+      case EncryptionMethod.TRADITIONAL:
+        return this.decryptTraditional(encryptedData, password);
+      case EncryptionMethod.AES_128:
+      case EncryptionMethod.AES_192:
+      case EncryptionMethod.AES_256:
+        return this.decryptAES(encryptedData, password);
+      default:
+        throw new UnsupportedEncryptionError(this.encryptionInfo.encryptionMethod);
+    }
+  }
+
+  /**
+   * Decrypt traditional ZIP 2.0 encryption
+   * This implements the standard ZIP 2.0 encryption algorithm
+   */
+  private decryptTraditional(encryptedData: Buffer, password: string): Buffer {
+    if (encryptedData.length < 12) {
+      throw new Error('Invalid encrypted data: too short for traditional encryption');
+    }
+
+    // Initialize keys with password
+    let key0 = 0x12345678;
+    let key1 = 0x23456789;
+    let key2 = 0x34567890;
+
+    // Process password to initialize keys
+    for (let i = 0; i < password.length; i++) {
+      key0 = this.crc32Update(key0, password.charCodeAt(i));
+      key1 = (key1 + (key0 & 0xff)) & 0xffffffff;
+      key1 = ((key1 * 134775813 + 1) & 0xffffffff) >>> 0;
+      key2 = this.crc32Update(key2, key1 >>> 24);
+    }
+
+    // Verify password using encryption header (first 12 bytes)
+    const header = Buffer.alloc(12);
+    for (let i = 0; i < 12; i++) {
+      const c = encryptedData[i] ^ this.decryptByte(key0, key1, key2);
+      this.updateKeys(key0, key1, key2, c);
+      header[i] = c;
+      key0 = this.keys[0];
+      key1 = this.keys[1];
+      key2 = this.keys[2];
+    }
+
+    // For ZIP 2.0, the last byte of header should match high byte of CRC or time
+    // This is a basic password verification
+    const expectedByte = (this.fileData!.lfh.crc32 >>> 24) & 0xff;
+    if (header[11] !== expectedByte) {
+      throw new InvalidPasswordError(EncryptionMethod.TRADITIONAL);
+    }
+
+    // Decrypt the actual data
+    const decryptedData = Buffer.alloc(encryptedData.length - 12);
+    for (let i = 12; i < encryptedData.length; i++) {
+      const c = encryptedData[i] ^ this.decryptByte(key0, key1, key2);
+      this.updateKeys(key0, key1, key2, c);
+      decryptedData[i - 12] = c;
+      key0 = this.keys[0];
+      key1 = this.keys[1];
+      key2 = this.keys[2];
+    }
+
+    return decryptedData;
+  }
+
+  private keys = [0, 0, 0]; // Temporary storage for key updates
+
+  private crc32Update(crc: number, byte: number): number {
+    // Simple CRC32 update (in real implementation, use proper CRC32 table)
+    return ((crc >>> 8) ^ this.crc32Table[(crc ^ byte) & 0xff]) >>> 0;
+  }
+
+  private decryptByte(key0: number, key1: number, key2: number): number {
+    const temp = (key2 | 2) >>> 0;
+    return ((temp * (temp ^ 1)) >>> 8) & 0xff;
+  }
+
+  private updateKeys(key0: number, key1: number, key2: number, c: number): void {
+    key0 = this.crc32Update(key0, c);
+    key1 = (key1 + (key0 & 0xff)) & 0xffffffff;
+    key1 = ((key1 * 134775813 + 1) & 0xffffffff) >>> 0;
+    key2 = this.crc32Update(key2, key1 >>> 24);
+
+    this.keys[0] = key0;
+    this.keys[1] = key1;
+    this.keys[2] = key2;
+  }
+
+  // CRC32 table for traditional encryption (simplified)
+  private crc32Table = new Array(256).fill(0).map((_, i) => {
+    let c = i;
+    for (let j = 0; j < 8; j++) {
+      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    }
+    return c >>> 0;
+  });
+
+  /**
+   * Decrypt AES encrypted ZIP data using WinZip AES format
+   * Implements the WinZip AES specification with HMAC authentication
+   */
+  private decryptAES(encryptedData: Buffer, password: string): Buffer {
+    if (encryptedData.length < 12) {
+      throw new Error('Invalid AES encrypted data: too short');
+    }
+
+    // Determine key lengths based on AES variant
+    const keyLength = this.getAESKeyLength();
+    const saltLength = keyLength / 2; // Salt is half the key length
+    const macLength = 10; // HMAC-SHA1 truncated to 10 bytes
+
+    if (encryptedData.length < saltLength + macLength + 2) {
+      throw new Error('Invalid AES encrypted data: insufficient data for salt and MAC');
+    }
+
+    // Extract components
+    const salt = encryptedData.subarray(0, saltLength);
+    const passwordVerification = encryptedData.subarray(saltLength, saltLength + 2);
+    const encryptedContent = encryptedData.subarray(saltLength + 2, encryptedData.length - macLength);
+    const authenticationCode = encryptedData.subarray(encryptedData.length - macLength);
+
+    // Derive encryption and authentication keys using PBKDF2
+    const keyMaterial = pbkdf2Sync(password, salt, 1000, keyLength + keyLength + 2, 'sha1');
+    const encryptionKey = keyMaterial.subarray(0, keyLength);
+    const authenticationKey = keyMaterial.subarray(keyLength, keyLength + keyLength);
+    const passwordCheck = keyMaterial.subarray(keyLength + keyLength, keyLength + keyLength + 2);
+
+    // Verify password using constant-time comparison for security
+    if (!this.constantTimeEquals(passwordVerification, passwordCheck)) {
+      throw new InvalidPasswordError(this.encryptionInfo.encryptionMethod);
+    }
+
+    // Verify HMAC authentication
+    const hmac = createHmac('sha1', authenticationKey);
+    hmac.update(encryptedContent);
+    const computedMac = hmac.digest().subarray(0, macLength);
+    
+    // Verify HMAC using constant-time comparison for security
+    if (!this.constantTimeEquals(authenticationCode, computedMac)) {
+      throw new EncryptionError('AES authentication failed: file may be corrupted or password incorrect', this.encryptionInfo.encryptionMethod);
+    }
+
+    // Decrypt content using AES-CTR mode
+    const iv = Buffer.alloc(16); // AES-CTR uses 16-byte IV, initialized to 0
+    const cipher = this.getAESCipherName();
+    const decipher = createDecipheriv(cipher, encryptionKey, iv);
+    
+    let decryptedData = decipher.update(encryptedContent);
+    const final = decipher.final();
+    
+    if (final.length > 0) {
+      decryptedData = Buffer.concat([decryptedData, final]);
+    }
+
+    return decryptedData;
+  }
+
+  /**
+   * Get AES key length in bytes based on encryption method
+   */
+  private getAESKeyLength(): number {
+    switch (this.encryptionInfo.encryptionMethod) {
+      case EncryptionMethod.AES_128:
+        return 16;
+      case EncryptionMethod.AES_192:
+        return 24;
+      case EncryptionMethod.AES_256:
+        return 32;
+      default:
+        throw new UnsupportedEncryptionError(this.encryptionInfo.encryptionMethod);
+    }
+  }
+
+  /**
+   * Get AES cipher name for Node.js crypto module
+   */
+  private getAESCipherName(): string {
+    switch (this.encryptionInfo.encryptionMethod) {
+      case EncryptionMethod.AES_128:
+        return 'aes-128-ctr';
+      case EncryptionMethod.AES_192:
+        return 'aes-192-ctr';
+      case EncryptionMethod.AES_256:
+        return 'aes-256-ctr';
+      default:
+        throw new UnsupportedEncryptionError(this.encryptionInfo.encryptionMethod);
+    }
+  }
+
+  /**
+   * Get the actual compression method for AES encrypted files
+   * For AES files, the actual compression method is stored in the extra field
+   */
+  private getActualCompressionMethod(): number {
+    if (this.cdfh.compressionMethod !== CompressionMethod.AES) {
+      return this.cdfh.compressionMethod;
+    }
+
+    // For AES files, extract the actual compression method from extra field
+    const data = this.cdfh.dataBuffer;
+    const extraFieldStart = 46 + this.cdfh.fileName.length;
+    const extraFieldEnd = extraFieldStart + this.cdfh.extraFieldLength;
+
+    if (data.length < extraFieldEnd) {
+      return CompressionMethod.NONE; // Default fallback
+    }
+
+    let offset = extraFieldStart;
+    while (offset < extraFieldEnd - 4) {
+      const headerID = data.readUInt16LE(offset);
+      const dataSize = data.readUInt16LE(offset + 2);
+
+      // AES extra field header ID (0x9901)
+      if (headerID === 0x9901 && dataSize >= 7) {
+        // The actual compression method is stored at offset 9 (2 bytes)
+        return data.readUInt16LE(offset + 4 + 5); // +4 for header, +5 for version(2) + vendor(2) + strength(1)
+      }
+
+      offset += 4 + dataSize;
+    }
+
+    return CompressionMethod.NONE; // Default fallback
+  }
+
+  /**
+   * Constant-time comparison for password/HMAC verification to prevent timing attacks
+   */
+  private constantTimeEquals(a: Buffer, b: Buffer): boolean {
+    if (a.length !== b.length) {
+      return false;
+    }
+
+    let result = 0;
+    for (let i = 0; i < a.length; i++) {
+      result |= a[i] ^ b[i];
+    }
+    return result === 0;
   }
 }
 
@@ -1137,14 +1626,96 @@ export class AdvZlib {
   }
 
   /**
+   * Check if a ZIP file or entry is encrypted
+   * @param src The path of the zip file or entry to check
+   * @param options Optional options for the operation
+   * @returns A promise that resolves to true if the ZIP contains encrypted entries
+   */
+  public async isEncrypted(src: string, options?: ExistsOptions): Promise<boolean> {
+    this.logger.debug(`[AdvZlib] isEncrypted(): Checking encryption for ${src}`);
+
+    if (!src) {
+      throw new Error(`[AdvZlib] isEncrypted(): src is required`);
+    }
+
+    try {
+      const centralDir = await this.createOrGetCentralDir(src);
+      if (!centralDir) {
+        return false;
+      }
+
+      if (this.isZipFile(src)) {
+        // Check if any entry in the ZIP is encrypted
+        return centralDir.entries.some((entry) => entry.isEncrypted);
+      }
+
+      // Check specific entry
+      const entry = centralDir.entries.find((entry) => this.matchEntryByFullPath(entry, src));
+      return entry ? entry.isEncrypted : false;
+    } catch (error) {
+      this.logger.debug(`[AdvZlib] isEncrypted(): Error checking ${src}: ${error}`);
+      return false;
+    }
+  }
+
+  /**
+   * Get detailed encryption information for a ZIP file or entry
+   * @param src The path of the zip file or entry
+   * @param options Optional options for the operation
+   * @returns A promise that resolves to encryption information
+   */
+  public async getEncryptionInfo(src: string, options?: ExistsOptions): Promise<EncryptionInfo> {
+    this.logger.debug(`[AdvZlib] getEncryptionInfo(): Getting encryption info for ${src}`);
+
+    if (!src) {
+      throw new Error(`[AdvZlib] getEncryptionInfo(): src is required`);
+    }
+
+    const centralDir = await this.createOrGetCentralDir(src);
+    if (!centralDir) {
+      throw new Error(`[AdvZlib] getEncryptionInfo(): Failed to get central directory for ${src}`);
+    }
+
+    if (this.isZipFile(src)) {
+      // Return info about the most restrictive encryption in the ZIP
+      const encryptedEntries = centralDir.entries.filter((entry) => entry.isEncrypted);
+      if (encryptedEntries.length === 0) {
+        return { isEncrypted: false, encryptionMethod: EncryptionMethod.NONE, needsPassword: false };
+      }
+
+      // Find the strongest encryption method used
+      const methods = encryptedEntries.map((e) => e.encryptionInfo.encryptionMethod);
+      const strongestMethod = methods.includes(EncryptionMethod.AES_256)
+        ? EncryptionMethod.AES_256
+        : methods.includes(EncryptionMethod.AES_192)
+        ? EncryptionMethod.AES_192
+        : methods.includes(EncryptionMethod.AES_128)
+        ? EncryptionMethod.AES_128
+        : methods.includes(EncryptionMethod.TRADITIONAL)
+        ? EncryptionMethod.TRADITIONAL
+        : EncryptionMethod.UNKNOWN;
+
+      return { isEncrypted: true, encryptionMethod: strongestMethod, needsPassword: true };
+    }
+
+    // Check specific entry
+    const entry = centralDir.entries.find((entry) => this.matchEntryByFullPath(entry, src));
+    if (!entry) {
+      throw new Error(`[AdvZlib] getEncryptionInfo(): Entry not found: ${src}`);
+    }
+
+    return entry.encryptionInfo;
+  }
+
+  /**
    * Get the list of entries in a ZIP file
    * @param src The path of the zip file which can be:
    * - Normal: `/a/b.zip`
    * - Nested zip: `/a/b.zip/c.zip` or `/a/b.zip/c/d.zip`
-   * @param filterFn An optional callback function to filter entries
+   * @param options Optional options including filter function and password for encrypted files
    * @returns A promise that resolves to the list of filtered entries in the ZIP file.
    */
-  public async getEntries(src: string, filterFn?: (entry: ZipEntry) => boolean): Promise<ZipEntry[]> {
+  public async getEntries(src: string, options?: GetEntriesOptions): Promise<ZipEntry[]> {
     this.logger.debug(`[AdvZlib] getEntries(): Getting entries for ${src}`);
 
     if (!src) {
@@ -1168,7 +1739,7 @@ export class AdvZlib {
       return [];
     }
 
-    return centralDir.entries.filter((entry) => (filterFn ? filterFn(entry) : true));
+    return centralDir.entries.filter((entry) => (options?.filter ? options.filter(entry) : true));
   }
 
   /**
@@ -1177,9 +1748,10 @@ export class AdvZlib {
    * - Normal: `/a/b.zip/c.txt`
    * - Folder: `/a/b.zip/c/`
    * - Nested zip: `/a/b.zip/c.zip`
+   * @param options Optional options including password for encrypted files
    * @returns A promise that resolves to a boolean indicating whether the file exists in the ZIP file.
    */
-  public async exists(src: string): Promise<boolean> {
+  public async exists(src: string, options?: ExistsOptions): Promise<boolean> {
     this.logger.debug(`[AdvZlib] exists(): Checking if ${src} exists`);
 
     if (!src) {
@@ -1192,15 +1764,15 @@ export class AdvZlib {
 
     try {
       const centralDir = await this.createOrGetCentralDir(src);
-    if (this.isZipFile(src)) {
-      return !!centralDir;
-    }
+      if (this.isZipFile(src)) {
+        return !!centralDir;
+      }
 
-    if (!centralDir) {
-      return false;
-    }
+      if (!centralDir) {
+        return false;
+      }
 
-    const entry = centralDir.entries.find((entry) => this.matchEntryByFullPath(entry, src));
+      const entry = centralDir.entries.find((entry) => this.matchEntryByFullPath(entry, src));
       return !!entry;
     } catch (error) {
       // If we can't access the ZIP file (e.g., it doesn't exist), return false
@@ -1217,12 +1789,15 @@ export class AdvZlib {
    * - Case1: src is a zip(whatever nested or not) file, then `dest` must be a directory and this directory must exist.
    * - Case2: src is a particular file within a zip file, then `dest` can either be a directory(where the content will be extracted)
    *   or a file path(indicating where the extracted content will be saved).
-   * @param filterFn An optional filter function that determines which entries to extract.
-   *                   If provided, only entries for which the function returns `true` will be extracted.
+   * @param options Optional options including filter function and password for encrypted files
    * @returns A promise that resolves to an array of full paths of the extracted files.
    * @throws Will throw an error if the `src` ZIP file does not exist or if the `dest` directory does not exist.
    */
-  public async extract(src: string, dest: string, filterFn?: (entry: ZipEntry) => boolean): Promise<string[]> {
+  public async extract(
+    src: string,
+    dest: string,
+    options?: ExtractOptions
+  ): Promise<string[]> {
     this.logger.debug(`[AdvZlib] extract(): Extracting ${src} to ${dest}`);
 
     if (!(await this.exists(src))) {
@@ -1237,7 +1812,7 @@ export class AdvZlib {
       throw new Error(`[AdvZlib] extract(): ${path.dirname(dest)} does not exist.`);
     }
 
-    if (!this.isZipFile(src) && filterFn) {
+    if (!this.isZipFile(src) && options?.filter) {
       throw new Error(`[AdvZlib] extract(): Filter function is only applicable for extracting a whole zip file.`);
     }
 
@@ -1247,8 +1822,17 @@ export class AdvZlib {
     }
 
     const extracted: string[] = [];
-    const entries = this.getRelatedEntries(src, centralDir.entries, filterFn);
-    await Promise.all(entries.map(async (entry) => extracted.push(await entry.extract(dest))));
+    const entries = this.getRelatedEntries(src, centralDir.entries, options?.filter);
+
+    // Extract all entries using the unified entry.extract() method
+    for (const entry of entries) {
+      try {
+        extracted.push(await entry.extract(dest, options?.password));
+      } catch (error) {
+        this.logger.error(`[AdvZlib] extract(): Failed to extract entry ${entry.relPath}: ${error}`);
+        throw error;
+      }
+    }
 
     return extracted;
   }
@@ -1257,17 +1841,16 @@ export class AdvZlib {
    * Reads the content of a specific file within a ZIP file.
    *
    * @param src - The path to the ZIP file or an entry within it. Accepted formats include:
-   *   - Type 1: `/a/b.zip` - Reads using a `filterFn` function to filter entries.
-   *   - Type 2: `/a/b.zip/c.txt` - Directly specifies a file entry to read, without a `filterFn`.
-   *   - Type 3: `/a/b.zip/c.zip` - Specifies a nested ZIP entry, read with a `filterFn` function.
-   *   - Type 4: `/a/b.zip/c.zip/d.txt` - Directly specifies a file entry within a nested ZIP, without a `filterFn`.
-   * @param filterFn - An optional filter function to select entries within the ZIP file.
-   *                   If provided, only entries for which the function returns `true` are considered.
+   *   - Type 1: `/a/b.zip` - Reads using a `filter` function to filter entries.
+   *   - Type 2: `/a/b.zip/c.txt` - Directly specifies a file entry to read, without a `filter`.
+   *   - Type 3: `/a/b.zip/c.zip` - Specifies a nested ZIP entry, read with a `filter` function.
+   *   - Type 4: `/a/b.zip/c.zip/d.txt` - Directly specifies a file entry within a nested ZIP, without a `filter`.
+   * @param options - Optional options including filter function and password for encrypted files
    * @returns A promise that resolves to a `Buffer` containing the file's contents, or an empty `Buffer`
    *          if no matching entry is found or if multiple entries match.
    * @throws Will throw an error if the `src` file does not exist.
    */
-  public async read(src: string, filterFn?: (entry: ZipEntry) => boolean): Promise<Buffer> {
+  public async read(src: string, options?: ReadOptions): Promise<Buffer> {
     this.logger.info(`[AdvZlib] read(): Reading content from ${src}`);
 
     if (!(await this.exists(src))) {
@@ -1279,7 +1862,7 @@ export class AdvZlib {
       throw new Error(`[AdvZlib] read(): Failed to get central directory for ${src}`);
     }
 
-    const entries = this.getRelatedEntries(src, centralDir.entries, filterFn);
+    const entries = this.getRelatedEntries(src, centralDir.entries, options?.filter);
     if (entries.length === 0) {
       this.logger.error(`[AdvZlib] read(): No matching entries found in ${src}`);
       return Buffer.alloc(0);
@@ -1290,7 +1873,7 @@ export class AdvZlib {
       return Buffer.alloc(0);
     }
 
-    return await entries[0].read();
+    return await entries[0].read(options?.password);
   }
 
   /**
@@ -1391,7 +1974,7 @@ export class AdvZlib {
   private getLastEntryRelPath(src: string, includeZip = false): string {
     // Normalize the source path first
     const normalizedSrc = this.normalizePath(src);
-    
+
     // Find the last ZIP file in the path
     const lastZipPath = this.findLastZipPath(normalizedSrc);
     if (!lastZipPath) {
@@ -1501,7 +2084,7 @@ export class AdvZlib {
           }
 
           currentCentralDir = await CentralDir.create(segment, fd, this.contentCache, parentZipMtime);
-          
+
           // Cache filesystem ZIP
           await this.cache.set(segment, currentCentralDir);
           previousZipPath = segment;
@@ -1525,7 +2108,7 @@ export class AdvZlib {
 
           // For nested ZIPs, use current timestamp for simple cache management
           const nestedZipMtime = Date.now();
-          
+
           currentCentralDir = await CentralDir.create(segment, data, this.contentCache, nestedZipMtime);
 
           // Cache nested ZIP with composite cache key

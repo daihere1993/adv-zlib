@@ -102,7 +102,7 @@ describe('AdvZlib Core API', () => {
     });
 
     test('should use filter function to select specific entries', async () => {
-      const content = await advZlib.read(basicAssets.simpleText, (entry) => entry.name === 'sample.txt');
+      const content = await advZlib.read(basicAssets.simpleText, { filter: (entry) => entry.name === 'sample.txt' });
       expect(content.toString()).toContain('Hello, World!');
     });
   });
@@ -139,7 +139,7 @@ describe('AdvZlib Core API', () => {
       const outputDir = join(testAssetsDir, 'extract-filtered');
       await fs.mkdir(outputDir, { recursive: true });
 
-      const extracted = await advZlib.extract(basicAssets.withDirectories, outputDir, (entry) => entry.name.endsWith('.txt'));
+      const extracted = await advZlib.extract(basicAssets.withDirectories, outputDir, { filter: (entry) => entry.name.endsWith('.txt') });
 
       expect(extracted.length).toBeGreaterThan(0);
       extracted.forEach((path) => {
@@ -175,7 +175,7 @@ describe('AdvZlib Core API', () => {
     });
 
     test('should filter entries using filter function', async () => {
-      const entries = await advZlib.getEntries(basicAssets.withDirectories, (entry) => entry.name.endsWith('.txt'));
+      const entries = await advZlib.getEntries(basicAssets.withDirectories, { filter: (entry) => entry.name.endsWith('.txt') });
 
       expect(entries.length).toBeGreaterThan(0);
       entries.forEach((entry) => {

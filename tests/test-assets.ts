@@ -1,6 +1,7 @@
 import { promises as fs, createWriteStream } from 'fs';
 import { join } from 'path';
 import archiver from 'archiver';
+import { randomBytes, pbkdf2Sync, createCipheriv, createHmac } from 'crypto';
 // Simple logging functions for test asset creation
 const debug = (msg: string) => process.env.TEST_VERBOSE && console.debug(`[DEBUG] ${msg}`);
 const info = (msg: string) => console.info(`[INFO] ${msg}`);
@@ -665,4 +666,408 @@ export async function verifyZipFile(zipPath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// ===== ENCRYPTED ZIP CREATION FUNCTIONS =====
+
+/**
+ * Create a ZIP file with traditional encryption
+ */
+export async function createTraditionalEncryptedZip(
+  outputPath: string,
+  files: Array<{ name: string; content: string | Buffer }>,
+  password: string
+): Promise<void> {
+  const zipData = await createEncryptedZipBuffer(files, password, 'traditional');
+  await fs.writeFile(outputPath, zipData);
+}
+
+/**
+ * Create a ZIP file with AES encryption
+ */
+export async function createAESEncryptedZip(
+  outputPath: string,
+  files: Array<{ name: string; content: string | Buffer }>,
+  password: string,
+  aesStrength: 128 | 192 | 256 = 256
+): Promise<void> {
+  const zipData = await createEncryptedZipBuffer(files, password, 'aes', aesStrength);
+  await fs.writeFile(outputPath, zipData);
+}
+
+/**
+ * Create encrypted ZIP buffer manually implementing ZIP format
+ */
+async function createEncryptedZipBuffer(
+  files: Array<{ name: string; content: string | Buffer }>,
+  password: string,
+  encryptionType: 'traditional' | 'aes' = 'traditional',
+  aesStrength: 128 | 192 | 256 = 256
+): Promise<Buffer> {
+  const centralDirEntries: Buffer[] = [];
+  const fileDataEntries: Buffer[] = [];
+  let currentOffset = 0;
+
+  for (const file of files) {
+    const content = Buffer.isBuffer(file.content) ? file.content : Buffer.from(file.content, 'utf8');
+    const fileName = Buffer.from(file.name, 'utf8');
+    
+    // Calculate CRC32
+    const crc32 = calculateCRC32(content);
+    
+    // Encrypt the content
+    const encryptedContent = encryptionType === 'traditional' 
+      ? encryptTraditional(content, password, crc32)
+      : encryptAES(content, password, aesStrength);
+    
+    // Create Local File Header
+    const lfh = createLocalFileHeader(fileName, encryptedContent, crc32, content.length, encryptionType, aesStrength);
+    fileDataEntries.push(lfh);
+    fileDataEntries.push(encryptedContent);
+    
+    // Create Central Directory File Header
+    const cdfh = createCentralDirFileHeader(fileName, encryptedContent, crc32, content.length, currentOffset, encryptionType, aesStrength);
+    centralDirEntries.push(cdfh);
+    
+    currentOffset += lfh.length + encryptedContent.length;
+  }
+
+  // Combine all file data
+  const fileData = Buffer.concat(fileDataEntries);
+  const centralDir = Buffer.concat(centralDirEntries);
+  
+  // Create End of Central Directory Record
+  const eocd = createEndOfCentralDir(centralDir.length, fileData.length, files.length);
+  
+  return Buffer.concat([fileData, centralDir, eocd]);
+}
+
+/**
+ * Create Local File Header with encryption flag
+ */
+function createLocalFileHeader(
+  fileName: Buffer,
+  encryptedContent: Buffer,
+  crc32: number,
+  uncompressedSize: number,
+  encryptionType: 'traditional' | 'aes' = 'traditional',
+  aesStrength: 128 | 192 | 256 = 256
+): Buffer {
+  const header = Buffer.alloc(30 + fileName.length);
+  let offset = 0;
+
+  // Local file header signature
+  header.writeUInt32LE(0x04034b50, offset); offset += 4;
+  
+  // Version needed to extract
+  header.writeUInt16LE(20, offset); offset += 2;
+  
+  // General purpose bit flag (bit 0 = encrypted, bit 6 = strong encryption for AES)
+  const bitFlag = encryptionType === 'aes' ? 0x0041 : 0x0001; // 0x40 = strong encryption
+  header.writeUInt16LE(bitFlag, offset); offset += 2;
+  
+  // Compression method (0 = stored, 99 = AES)
+  const compressionMethod = encryptionType === 'aes' ? 99 : 0;
+  header.writeUInt16LE(compressionMethod, offset); offset += 2;
+  
+  // File last modification time & date (dummy values)
+  header.writeUInt16LE(0x0000, offset); offset += 2;
+  header.writeUInt16LE(0x0021, offset); offset += 2;
+  
+  // CRC-32
+  header.writeUInt32LE(crc32, offset); offset += 4;
+  
+  // Compressed size (encrypted size)
+  header.writeUInt32LE(encryptedContent.length, offset); offset += 4;
+  
+  // Uncompressed size
+  header.writeUInt32LE(uncompressedSize, offset); offset += 4;
+  
+  // File name length
+  header.writeUInt16LE(fileName.length, offset); offset += 2;
+  
+  // Extra field length (AES needs extra field)
+  const extraFieldLength = encryptionType === 'aes' ? 11 : 0;
+  header.writeUInt16LE(extraFieldLength, offset); offset += 2;
+  
+  // File name
+  fileName.copy(header, offset);
+  
+  // Add AES extra field if needed
+  if (encryptionType === 'aes') {
+    const headerWithExtra = Buffer.alloc(header.length + extraFieldLength);
+    header.copy(headerWithExtra);
+    
+    let extraOffset = header.length;
+    // AES extra field header ID (0x9901)
+    headerWithExtra.writeUInt16LE(0x9901, extraOffset); extraOffset += 2;
+    // Data size (7 bytes)
+    headerWithExtra.writeUInt16LE(7, extraOffset); extraOffset += 2;
+    // AES version (2)
+    headerWithExtra.writeUInt16LE(2, extraOffset); extraOffset += 2;
+    // Vendor ID ('AE')
+    headerWithExtra.write('AE', extraOffset); extraOffset += 2;
+    // AES strength (1=128, 2=192, 3=256)
+    const strength = aesStrength === 128 ? 1 : aesStrength === 192 ? 2 : 3;
+    headerWithExtra.writeUInt8(strength, extraOffset); extraOffset += 1;
+    // Actual compression method (0 = stored)
+    headerWithExtra.writeUInt16LE(0, extraOffset);
+    
+    return headerWithExtra;
+  }
+  
+  return header;
+}
+
+/**
+ * Create Central Directory File Header with encryption flag
+ */
+function createCentralDirFileHeader(
+  fileName: Buffer,
+  encryptedContent: Buffer,
+  crc32: number,
+  uncompressedSize: number,
+  localHeaderOffset: number,
+  encryptionType: 'traditional' | 'aes' = 'traditional',
+  aesStrength: 128 | 192 | 256 = 256
+): Buffer {
+  const header = Buffer.alloc(46 + fileName.length);
+  let offset = 0;
+
+  // Central directory file header signature
+  header.writeUInt32LE(0x02014b50, offset); offset += 4;
+  
+  // Version made by
+  header.writeUInt16LE(20, offset); offset += 2;
+  
+  // Version needed to extract
+  header.writeUInt16LE(20, offset); offset += 2;
+  
+  // General purpose bit flag (bit 0 = encrypted, bit 6 = strong encryption for AES)
+  const bitFlag = encryptionType === 'aes' ? 0x0041 : 0x0001;
+  header.writeUInt16LE(bitFlag, offset); offset += 2;
+  
+  // Compression method (0 = stored, 99 = AES)
+  const compressionMethod = encryptionType === 'aes' ? 99 : 0;
+  header.writeUInt16LE(compressionMethod, offset); offset += 2;
+  
+  // File last modification time & date
+  header.writeUInt16LE(0x0000, offset); offset += 2;
+  header.writeUInt16LE(0x0021, offset); offset += 2;
+  
+  // CRC-32
+  header.writeUInt32LE(crc32, offset); offset += 4;
+  
+  // Compressed size
+  header.writeUInt32LE(encryptedContent.length, offset); offset += 4;
+  
+  // Uncompressed size
+  header.writeUInt32LE(uncompressedSize, offset); offset += 4;
+  
+  // File name length
+  header.writeUInt16LE(fileName.length, offset); offset += 2;
+  
+  // Extra field length (AES needs extra field)
+  const extraFieldLength = encryptionType === 'aes' ? 11 : 0;
+  header.writeUInt16LE(extraFieldLength, offset); offset += 2;
+  
+  // File comment length
+  header.writeUInt16LE(0, offset); offset += 2;
+  
+  // Disk number start
+  header.writeUInt16LE(0, offset); offset += 2;
+  
+  // Internal file attributes
+  header.writeUInt16LE(0, offset); offset += 2;
+  
+  // External file attributes
+  header.writeUInt32LE(0, offset); offset += 4;
+  
+  // Relative offset of local header
+  header.writeUInt32LE(localHeaderOffset, offset); offset += 4;
+  
+  // File name
+  fileName.copy(header, offset);
+  
+  // Add AES extra field if needed
+  if (encryptionType === 'aes') {
+    const headerWithExtra = Buffer.alloc(header.length + extraFieldLength);
+    header.copy(headerWithExtra);
+    
+    let extraOffset = header.length;
+    // AES extra field header ID (0x9901)
+    headerWithExtra.writeUInt16LE(0x9901, extraOffset); extraOffset += 2;
+    // Data size (7 bytes)
+    headerWithExtra.writeUInt16LE(7, extraOffset); extraOffset += 2;
+    // AES version (2)
+    headerWithExtra.writeUInt16LE(2, extraOffset); extraOffset += 2;
+    // Vendor ID ('AE')
+    headerWithExtra.write('AE', extraOffset); extraOffset += 2;
+    // AES strength (1=128, 2=192, 3=256)
+    const strength = aesStrength === 128 ? 1 : aesStrength === 192 ? 2 : 3;
+    headerWithExtra.writeUInt8(strength, extraOffset); extraOffset += 1;
+    // Actual compression method (0 = stored)
+    headerWithExtra.writeUInt16LE(0, extraOffset);
+    
+    return headerWithExtra;
+  }
+  
+  return header;
+}
+
+/**
+ * Create End of Central Directory Record
+ */
+function createEndOfCentralDir(
+  centralDirSize: number,
+  centralDirOffset: number,
+  entryCount: number
+): Buffer {
+  const eocd = Buffer.alloc(22);
+  let offset = 0;
+
+  // End of central dir signature
+  eocd.writeUInt32LE(0x06054b50, offset); offset += 4;
+  
+  // Number of this disk
+  eocd.writeUInt16LE(0, offset); offset += 2;
+  
+  // Number of disk with start of central directory
+  eocd.writeUInt16LE(0, offset); offset += 2;
+  
+  // Total number of entries in central directory on this disk
+  eocd.writeUInt16LE(entryCount, offset); offset += 2;
+  
+  // Total number of entries in central directory
+  eocd.writeUInt16LE(entryCount, offset); offset += 2;
+  
+  // Size of central directory
+  eocd.writeUInt32LE(centralDirSize, offset); offset += 4;
+  
+  // Offset of start of central directory
+  eocd.writeUInt32LE(centralDirOffset, offset); offset += 4;
+  
+  // ZIP file comment length
+  eocd.writeUInt16LE(0, offset);
+  
+  return eocd;
+}
+
+/**
+ * Encrypt content using traditional ZIP encryption
+ */
+function encryptTraditional(content: Buffer, password: string, crc32: number): Buffer {
+  // Initialize keys
+  let key0 = 0x12345678;
+  let key1 = 0x23456789;
+  let key2 = 0x34567890;
+
+  // Process password to initialize keys
+  for (let i = 0; i < password.length; i++) {
+    key0 = crc32Update(key0, password.charCodeAt(i));
+    key1 = (key1 + (key0 & 0xff)) & 0xffffffff;
+    key1 = ((key1 * 134775813 + 1) & 0xffffffff) >>> 0;
+    key2 = crc32Update(key2, key1 >>> 24);
+  }
+
+  // Create encryption header (12 bytes)
+  const header = Buffer.alloc(12);
+  for (let i = 0; i < 11; i++) {
+    const randomByte = Math.floor(Math.random() * 256);
+    header[i] = randomByte ^ decryptByte(key0, key1, key2);
+    const keys = updateKeys(key0, key1, key2, randomByte);
+    key0 = keys[0]; key1 = keys[1]; key2 = keys[2];
+  }
+  
+  // Last byte should match high byte of CRC
+  const lastByte = (crc32 >>> 24) & 0xff;
+  header[11] = lastByte ^ decryptByte(key0, key1, key2);
+  const keys = updateKeys(key0, key1, key2, lastByte);
+  key0 = keys[0]; key1 = keys[1]; key2 = keys[2];
+
+  // Encrypt the actual content
+  const encryptedContent = Buffer.alloc(content.length);
+  for (let i = 0; i < content.length; i++) {
+    const plainByte = content[i];
+    encryptedContent[i] = plainByte ^ decryptByte(key0, key1, key2);
+    const updatedKeys = updateKeys(key0, key1, key2, plainByte);
+    key0 = updatedKeys[0]; key1 = updatedKeys[1]; key2 = updatedKeys[2];
+  }
+
+  return Buffer.concat([header, encryptedContent]);
+}
+
+function crc32Update(crc: number, byte: number): number {
+  return ((crc >>> 8) ^ crc32Table[(crc ^ byte) & 0xff]) >>> 0;
+}
+
+function decryptByte(key0: number, key1: number, key2: number): number {
+  const temp = (key2 | 2) >>> 0;
+  return ((temp * (temp ^ 1)) >>> 8) & 0xff;
+}
+
+function updateKeys(key0: number, key1: number, key2: number, c: number): [number, number, number] {
+  key0 = crc32Update(key0, c);
+  key1 = (key1 + (key0 & 0xff)) & 0xffffffff;
+  key1 = ((key1 * 134775813 + 1) & 0xffffffff) >>> 0;
+  key2 = crc32Update(key2, key1 >>> 24);
+  
+  return [key0, key1, key2];
+}
+
+/**
+ * Calculate CRC32 checksum
+ */
+function calculateCRC32(buffer: Buffer): number {
+  let crc = 0xffffffff;
+  for (let i = 0; i < buffer.length; i++) {
+    crc = ((crc >>> 8) ^ crc32Table[(crc ^ buffer[i]) & 0xff]) >>> 0;
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+// CRC32 table
+const crc32Table = new Array(256).fill(0).map((_, i) => {
+  let c = i;
+  for (let j = 0; j < 8; j++) {
+    c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+  }
+  return c >>> 0;
+});
+
+/**
+ * Encrypt content using AES encryption (WinZip format)
+ */
+function encryptAES(content: Buffer, password: string, aesStrength: 128 | 192 | 256 = 256): Buffer {
+  // Determine key length
+  const keyLength = aesStrength / 8; // 16, 24, or 32 bytes
+  const saltLength = keyLength / 2; // Salt is half the key length
+  
+  // Generate salt
+  const salt = randomBytes(saltLength);
+  
+  // Derive encryption and authentication keys using PBKDF2
+  const keyMaterial = pbkdf2Sync(password, salt, 1000, keyLength + keyLength + 2, 'sha1');
+  const encryptionKey = keyMaterial.subarray(0, keyLength);
+  const authenticationKey = keyMaterial.subarray(keyLength, keyLength + keyLength);
+  const passwordVerification = keyMaterial.subarray(keyLength + keyLength, keyLength + keyLength + 2);
+  
+  // Encrypt content using AES-CTR mode
+  const iv = Buffer.alloc(16); // AES-CTR uses 16-byte IV, initialized to 0
+  const cipherName = `aes-${aesStrength}-ctr`;
+  const cipher = createCipheriv(cipherName, encryptionKey, iv);
+  
+  let encryptedContent = cipher.update(content);
+  const final = cipher.final();
+  if (final.length > 0) {
+    encryptedContent = Buffer.concat([encryptedContent, final]);
+  }
+  
+  // Calculate HMAC authentication
+  const hmac = createHmac('sha1', authenticationKey);
+  hmac.update(encryptedContent);
+  const authenticationCode = hmac.digest().subarray(0, 10); // Truncate to 10 bytes
+  
+  // Combine: salt + password verification + encrypted content + authentication code
+  return Buffer.concat([salt, passwordVerification, encryptedContent, authenticationCode]);
 }
