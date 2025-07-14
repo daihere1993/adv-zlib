@@ -9,6 +9,7 @@
     "skipLibCheck": true,             // Skip type checking of declaration files
     "baseUrl": "./src",               // Base URL for resolving non-relative imports
     "sourceMap": true,                // Generate source maps
+    "sourceRoot": ".",                // Set source root to package root for production-friendly paths
     "inlineSources": true,            // Include source code in source maps
     "paths": {
       "*": ["./*"]                    // Map all paths to the base directory
