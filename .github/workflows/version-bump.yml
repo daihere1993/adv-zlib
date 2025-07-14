@@ -91,6 +91,11 @@ jobs:
       - name: Create summary
         run: |
           echo "## Version Bump Summary" >> $GITHUB_STEP_SUMMARY
-          echo "- **PR:** ${{ github.event.pull_request.title }}" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "- **Trigger:** Manual" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **PR:** ${{ github.event.pull_request.title }}" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "- **Type:** ${{ steps.bump-type.outputs.bump }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **New Version:** $(node -p 'require(\"./package.json\").version')" >> $GITHUB_STEP_SUMMARY
+          NEW_VERSION=$(node -p "require('./package.json').version")
+          echo "- **New Version:** $NEW_VERSION" >> $GITHUB_STEP_SUMMARY
