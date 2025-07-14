@@ -1,4 +1,4 @@
-import { createReadStream, createWriteStream, ReadStream, promises as fs } from 'fs';
+import { createReadStream, createWriteStream, ReadStream, promises as fs, statSync } from 'fs';
 import { FileHandle, open, stat } from 'fs/promises';
 import { PassThrough, Readable } from 'stream';
 import { pipeline } from 'node:stream/promises';
@@ -1206,7 +1206,7 @@ export class ZipEntry {
    */
   private determineOutputPath(dest: string): string {
     try {
-      const stats = require('fs').statSync(dest);
+      const stats = statSync(dest);
       if (stats.isDirectory()) {
         // When extracting to a directory, use just the filename (not the full relPath)
         // This maintains backward compatibility for single file extractions
