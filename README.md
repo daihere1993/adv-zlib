@@ -11,7 +11,7 @@ The go-to package for working with large and nested ZIP files — fast, efficien
   <a href="https://app.codecov.io/gh/daihere1993/adv-zlib/tree/main/projects">
     <img src="https://codecov.io/gh/daihere1993/adv-zlib/branch/main/graphs/badge.svg" alt="Coverage Status" />
   </a>
-  <a href="https://github.com/daihere1993/adv-zlib/actions/workflows/ci.yml"><img src="https://github.com/daihere1993/adv-zlib/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/daihere1993/adv-zlib/actions/workflows/test.yml"><img src="https://github.com/daihere1993/adv-zlib/actions/workflows/test.yml/badge.svg"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
 </div>
 
