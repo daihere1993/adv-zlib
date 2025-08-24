@@ -737,9 +737,9 @@ export class CentralDirFileHeader {
     // Extract filename if present
     if (this.fileNameLength > 0) {
       const fileNameBuffer = data.subarray(CentralDirFileHeader.MIN_SIZE, CentralDirFileHeader.MIN_SIZE + this.fileNameLength);
-      // Normalize the file name to accommodate windows as the separator always be "/"
-      // normalize() would consume more memory that is why we do it on-demand
-      this.fileName = path.normalize(fileNameBuffer.toString('utf8'));
+      // Keep the original filename with forward slashes as per ZIP specification
+      // ZIP files always use forward slashes internally, regardless of platform
+      this.fileName = fileNameBuffer.toString('utf8');
     } else {
       this.fileName = '';
     }
@@ -1046,8 +1046,11 @@ export class ZipEntry {
     this.source = source;
     this.cdfh = cdfh;
     this.name = path.basename(cdfh.fileName);
-    this.relPath = cdfh.fileName;
+    // Keep the internal ZIP path format (forward slashes) but convert to platform-specific for public API
+    // This ensures Windows users get backslashes and Unix users get forward slashes
+    this.relPath = cdfh.fileName.replace(/\//g, path.sep);
     this.size = cdfh.compressedSize;
+    // Use platform-specific path separator for consistency with user expectations
     this.fullPath = path.join(outerZipPath, this.relPath);
     this.isDirectory = this.relPath.endsWith('/') || this.relPath.endsWith('\\');
     this.isEncrypted = cdfh.encryptionInfo.isEncrypted;
@@ -1153,7 +1156,7 @@ export class ZipEntry {
     await this.init();
 
     const rawDataReadStream = await this.fileData!.createReadStream(this.source);
-    
+
     if (this.cdfh.compressionMethod === CompressionMethod.AES) {
       // For AES files, the stream needs special handling for decryption + decompression
       // Since this method doesn't handle passwords, we'll return the raw stream
@@ -1421,20 +1424,23 @@ export class ZipEntry {
     const hmac = createHmac('sha1', authenticationKey);
     hmac.update(encryptedContent);
     const computedMac = hmac.digest().subarray(0, macLength);
-    
+
     // Verify HMAC using constant-time comparison for security
     if (!this.constantTimeEquals(authenticationCode, computedMac)) {
-      throw new EncryptionError('AES authentication failed: file may be corrupted or password incorrect', this.encryptionInfo.encryptionMethod);
+      throw new EncryptionError(
+        'AES authentication failed: file may be corrupted or password incorrect',
+        this.encryptionInfo.encryptionMethod
+      );
     }
 
     // Decrypt content using AES-CTR mode
     const iv = Buffer.alloc(16); // AES-CTR uses 16-byte IV, initialized to 0
     const cipher = this.getAESCipherName();
     const decipher = createDecipheriv(cipher, encryptionKey, iv);
-    
+
     let decryptedData = decipher.update(encryptedContent);
     const final = decipher.final();
-    
+
     if (final.length > 0) {
       decryptedData = Buffer.concat([decryptedData, final]);
     }
@@ -1793,11 +1799,7 @@ export class AdvZlib {
    * @returns A promise that resolves to an array of full paths of the extracted files.
    * @throws Will throw an error if the `src` ZIP file does not exist or if the `dest` directory does not exist.
    */
-  public async extract(
-    src: string,
-    dest: string,
-    options?: ExtractOptions
-  ): Promise<string[]> {
+  public async extract(src: string, dest: string, options?: ExtractOptions): Promise<string[]> {
     this.logger.debug(`[AdvZlib] extract(): Extracting ${src} to ${dest}`);
 
     if (!(await this.exists(src))) {
@@ -1963,7 +1965,13 @@ export class AdvZlib {
     const entryRelPath = this.getLastEntryRelPath(src);
     return filterFn
       ? entries.filter((entry) => filterFn(entry))
-      : entries.filter((entry) => (entryRelPath ? entry.relPath === entryRelPath : true));
+      : entries.filter((entry) => {
+          if (!entryRelPath) return true;
+          // Normalize both paths to forward slashes for comparison
+          // since entry.relPath now uses platform-specific separators
+          const normalizedEntryPath = entry.relPath.replace(/\\/g, '/');
+          return normalizedEntryPath === entryRelPath;
+        });
   }
 
   /**
@@ -2094,7 +2102,8 @@ export class AdvZlib {
           const normalizedSegment = this.normalizePath(segment);
           const normalizedPreviousZipPath = this.normalizePath(previousZipPath);
           const relativePathInParent = normalizedSegment.substring(normalizedPreviousZipPath.length + 1); // +1 to remove the leading slash
-          const zipEntry = currentCentralDir.entries.find((entry) => entry.relPath === relativePathInParent);
+          // Normalize entry.relPath for comparison since it now uses platform-specific separators
+          const zipEntry = currentCentralDir.entries.find((entry) => entry.relPath.replace(/\\/g, '/') === relativePathInParent);
 
           if (!zipEntry) {
             throw new Error(`ZIP entry not found: ${relativePathInParent} in ${currentCentralDir.fullPath}`);

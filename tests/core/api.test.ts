@@ -105,6 +105,18 @@ describe('AdvZlib Core API', () => {
       const content = await advZlib.read(basicAssets.simpleText, { filter: (entry) => entry.name === 'sample.txt' });
       expect(content.toString()).toContain('Hello, World!');
     });
+
+    test('should read nested folder files with mixed path separators', async () => {
+      // Test the path normalization fix - should work with both Unix and Windows style paths
+      const unixPath = join(basicAssets.withDirectories, 'folder/subfolder/deep.txt');
+      const windowsPath = basicAssets.withDirectories + '\\folder\\subfolder\\deep.txt';
+
+      const content1 = await advZlib.read(unixPath);
+      expect(content1.toString()).toContain('Deep nested file');
+
+      const content2 = await advZlib.read(windowsPath);
+      expect(content2.toString()).toContain('Deep nested file');
+    });
   });
 
   describe('extract()', () => {
@@ -139,7 +151,9 @@ describe('AdvZlib Core API', () => {
       const outputDir = join(testAssetsDir, 'extract-filtered');
       await fs.mkdir(outputDir, { recursive: true });
 
-      const extracted = await advZlib.extract(basicAssets.withDirectories, outputDir, { filter: (entry) => entry.name.endsWith('.txt') });
+      const extracted = await advZlib.extract(basicAssets.withDirectories, outputDir, {
+        filter: (entry) => entry.name.endsWith('.txt'),
+      });
 
       expect(extracted.length).toBeGreaterThan(0);
       extracted.forEach((path) => {
@@ -195,6 +209,27 @@ describe('AdvZlib Core API', () => {
       const files = entries.filter((e) => !e.isDirectory);
       expect(files.length).toBeGreaterThan(2); // Should have multiple files
     });
+
+    test('should return entries with platform-appropriate path separators', async () => {
+      const entries = await advZlib.getEntries(basicAssets.withDirectories);
+      const nestedEntry = entries.find((e) => e.relPath.includes('folder') && e.relPath.includes('subfolder'));
+
+      expect(nestedEntry).toBeDefined();
+
+      // On this platform, paths should use the platform's path separator
+      const { sep } = require('path');
+      if (sep === '\\') {
+        // Windows: should use backslashes
+        expect(nestedEntry!.relPath).toMatch(/\\/);
+      } else {
+        // Unix: should use forward slashes
+        expect(nestedEntry!.relPath).toMatch(/\//);
+      }
+
+      // Should NOT have mixed separators
+      const hasMixedSeparators = nestedEntry!.relPath.includes('/') && nestedEntry!.relPath.includes('\\');
+      expect(hasMixedSeparators).toBe(false);
+    });
   });
 
   describe('Cache Integration', () => {
@@ -235,7 +270,7 @@ describe('AdvZlib Core API', () => {
 
       // Check cache performance - warm reads should be faster than cold read
       const avgWarmTime = warmTimes.reduce((a, b) => a + b, 0) / warmTimes.length;
-      
+
       expect(avgWarmTime).toBeLessThan(coldTime);
       expect(entries1.length).toBeGreaterThan(0);
     });
