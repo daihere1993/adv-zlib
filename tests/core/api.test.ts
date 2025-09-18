@@ -147,6 +147,38 @@ describe('AdvZlib Core API', () => {
       expect(dirExists).toBe(true);
     });
 
+    test('should extract nested folder contents to directory', async () => {
+      const outputDir = join(testAssetsDir, 'extract-nested-folder');
+      await fs.mkdir(outputDir, { recursive: true });
+
+      const nestedFolderPath = join(basicAssets.withDirectories, 'folder/');
+      expect(await advZlib.exists(nestedFolderPath)).toBe(true);
+
+      const extracted = await advZlib.extract(nestedFolderPath, outputDir);
+
+      expect(extracted.length).toBeGreaterThan(0);
+      expect(extracted).toContain(join(outputDir, 'nested.txt'));
+      expect(extracted).toContain(join(outputDir, 'subfolder', 'deep.txt'));
+
+      const rootFile = await fs.readFile(join(outputDir, 'nested.txt'), 'utf8');
+      expect(rootFile).toContain('File in folder');
+
+      const deepFile = await fs.readFile(join(outputDir, 'subfolder', 'deep.txt'), 'utf8');
+      expect(deepFile).toContain('Deep nested file');
+
+      const emptyDirExists = await fs
+        .access(join(outputDir, 'empty-subdir'))
+        .then(() => true)
+        .catch(() => false);
+      expect(emptyDirExists).toBe(true);
+
+      const folderExists = await fs
+        .access(join(outputDir, 'folder'))
+        .then(() => true)
+        .catch(() => false);
+      expect(folderExists).toBe(false);
+    });
+
     test('should extract with filter function', async () => {
       const outputDir = join(testAssetsDir, 'extract-filtered');
       await fs.mkdir(outputDir, { recursive: true });

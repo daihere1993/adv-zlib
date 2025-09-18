@@ -1779,7 +1779,35 @@ export class AdvZlib {
       }
 
       const entry = centralDir.entries.find((entry) => this.matchEntryByFullPath(entry, src));
-      return !!entry;
+      if (entry) {
+        return true;
+      }
+
+      const entryRelPath = this.getLastEntryRelPath(src);
+      if (!entryRelPath) {
+        return false;
+      }
+
+      const normalizedRelPath = entryRelPath.replace(/\\/g, '/');
+      const relPathWithoutSlash = normalizedRelPath.replace(/\/+$/, '');
+      const relPathWithSlash = relPathWithoutSlash ? `${relPathWithoutSlash}/` : '';
+      if (!relPathWithSlash) {
+        return false;
+      }
+
+      const normalizedSrc = this.normalizePath(src);
+      const hasChildEntries = centralDir.entries.some((entry) =>
+        entry.relPath.replace(/\\/g, '/').startsWith(relPathWithSlash)
+      );
+
+      const treatAsDirectoryQuery =
+        normalizedSrc.endsWith('/') || normalizedRelPath.endsWith('/') || hasChildEntries;
+
+      if (treatAsDirectoryQuery && hasChildEntries) {
+        return true;
+      }
+
+      return false;
     } catch (error) {
       // If we can't access the ZIP file (e.g., it doesn't exist), return false
       this.logger.debug(`[AdvZlib] exists(): Error checking ${src}: ${error}`);
@@ -1826,10 +1854,50 @@ export class AdvZlib {
     const extracted: string[] = [];
     const entries = this.getRelatedEntries(src, centralDir.entries, options?.filter);
 
-    // Extract all entries using the unified entry.extract() method
+    const baseRelPathRaw = this.getLastEntryRelPath(src);
+    const normalizedBaseRelPath = baseRelPathRaw ? baseRelPathRaw.replace(/\\/g, '/') : '';
+    const baseWithoutTrailingSlash = normalizedBaseRelPath.replace(/\/+$/, '');
+    const hasBaseRelPath = Boolean(baseWithoutTrailingSlash);
+    const targetIsDirectory = hasBaseRelPath && (entries.length > 1 || (entries.length === 1 && entries[0].isDirectory));
+
+    if (targetIsDirectory) {
+      await fs.mkdir(dest, { recursive: true });
+    }
+
     for (const entry of entries) {
       try {
-        extracted.push(await entry.extract(dest, options?.password));
+        if (targetIsDirectory) {
+          const normalizedEntryPath = entry.relPath.replace(/\\/g, '/');
+          let relativePath = normalizedEntryPath;
+
+          if (baseWithoutTrailingSlash) {
+            if (normalizedEntryPath === baseWithoutTrailingSlash || normalizedEntryPath === `${baseWithoutTrailingSlash}/`) {
+              relativePath = '';
+            } else if (normalizedEntryPath.startsWith(`${baseWithoutTrailingSlash}/`)) {
+              relativePath = normalizedEntryPath.slice(baseWithoutTrailingSlash.length + 1);
+            }
+          }
+
+          const relativeSegments = relativePath.split('/').filter((segment) => segment.length > 0);
+          if (relativeSegments.some((segment) => segment === '..')) {
+            throw new Error(`[AdvZlib] extract(): Unsafe path traversal detected in entry ${entry.relPath}`);
+          }
+
+          const relativePathForJoin = relativeSegments.join(path.sep);
+
+          if (entry.isDirectory) {
+            const dirPath = relativePathForJoin ? path.join(dest, relativePathForJoin) : dest;
+            await fs.mkdir(dirPath, { recursive: true });
+            extracted.push(dirPath);
+            continue;
+          }
+
+          const targetPath = relativePathForJoin ? path.join(dest, relativePathForJoin) : dest;
+          const extractedPath = await entry.extract(targetPath, options?.password);
+          extracted.push(extractedPath);
+        } else {
+          extracted.push(await entry.extract(dest, options?.password));
+        }
       } catch (error) {
         this.logger.error(`[AdvZlib] extract(): Failed to extract entry ${entry.relPath}: ${error}`);
         throw error;
@@ -1963,16 +2031,47 @@ export class AdvZlib {
    */
   private getRelatedEntries(src: string, entries: ZipEntry[], filterFn?: (entry: ZipEntry) => boolean): ZipEntry[] {
     const entryRelPath = this.getLastEntryRelPath(src);
-    return filterFn
-      ? entries.filter((entry) => filterFn(entry))
-      : entries.filter((entry) => {
-          if (!entryRelPath) return true;
-          // Normalize both paths to forward slashes for comparison
-          // since entry.relPath now uses platform-specific separators
+
+    if (filterFn) {
+      return entries.filter((entry) => filterFn(entry));
+    }
+
+    if (!entryRelPath) {
+      return entries;
+    }
+
+    const normalizedTarget = entryRelPath.replace(/\\/g, '/');
+    const targetWithoutTrailingSlash = normalizedTarget.replace(/\/+$/, '');
+    const targetWithSlash = targetWithoutTrailingSlash ? `${targetWithoutTrailingSlash}/` : '';
+    const normalizedSrc = this.normalizePath(src);
+    const srcEndsWithSlash = normalizedSrc.endsWith('/');
+
+    const shouldTreatAsDirectory =
+      Boolean(targetWithoutTrailingSlash) &&
+      (srcEndsWithSlash ||
+        entries.some((entry) => {
           const normalizedEntryPath = entry.relPath.replace(/\\/g, '/');
-          return normalizedEntryPath === entryRelPath;
-        });
+          return (
+            (entry.isDirectory &&
+              (normalizedEntryPath === targetWithoutTrailingSlash || normalizedEntryPath === targetWithSlash)) ||
+            (targetWithSlash ? normalizedEntryPath.startsWith(targetWithSlash) : false)
+          );
+        }));
+
+    return entries.filter((entry) => {
+      const normalizedEntryPath = entry.relPath.replace(/\\/g, '/');
+
+      if (shouldTreatAsDirectory) {
+        if (normalizedEntryPath === targetWithoutTrailingSlash || normalizedEntryPath === targetWithSlash) {
+          return true;
+        }
+        return targetWithSlash ? normalizedEntryPath.startsWith(targetWithSlash) : false;
+      }
+
+      return normalizedEntryPath === normalizedTarget || normalizedEntryPath === targetWithoutTrailingSlash;
+    });
   }
+
 
   /**
    * Get the last entry relative path, e.g., '/a/b.zip/c/d.txt' to 'c/d.txt'
