@@ -6,6 +6,7 @@ const config = {
   printWidth: 120,
   tabWidth: 2,
   arrowParens: 'always',
+  endOfLine: 'lf',
 };
 
 export default config;
