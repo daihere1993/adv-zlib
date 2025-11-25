@@ -578,7 +578,27 @@ export class AdvZlib {
   }
 
   private normalizePath(input: string): string {
-    return input.replace(/\\/g, '/');
+    // Convert all backslashes to forward slashes for cross-platform consistency
+    // Node.js accepts forward slashes as path separators on all platforms, including Windows
+    let normalized = input.replace(/\\/g, '/');
+
+    // Remove duplicate slashes while preserving:
+    // - Leading slash for absolute Unix paths (e.g., /home/user)
+    // - Drive letter colon for Windows absolute paths (e.g., C:/Users)
+    // The regex ([^:]) ensures we don't collapse slashes after colons (C://)
+    normalized = normalized.replace(/([^:])\/+/g, '$1/');
+
+    // Fix Windows paths that have a leading slash before the drive letter
+    // This can happen when backslash paths like '\C:\Users\...' are converted to '/C:/Users/...'
+    // Windows drive letters are a single letter followed by a colon (e.g., C:, D:)
+    normalized = normalized.replace(/^\/([a-zA-Z]:\/)/, '$1');
+
+    // Handle edge case where path starts with multiple slashes (but not after colon)
+    if (!normalized.includes(':')) {
+      normalized = normalized.replace(/^\/+/, '/');
+    }
+
+    return normalized;
   }
 
   private async isExistingFileOrFolder(path: string): Promise<boolean> {
