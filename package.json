@@ -1,6 +1,6 @@
 {
   "name": "adv-zlib",
-  "version": "1.0.5",
+  "version": "2.0.0",
   "description": "Modern zlib helpers for compressing and inflating Node.js data streams.",
   "license": "MIT",
   "type": "module",
