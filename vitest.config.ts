@@ -1,20 +1,15 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    include: ["tests/**/*.test.ts"],
-    environment: "node",
-    poolOptions: {
-      forks: {
-        execArgv: ["--expose-gc"],
-      },
-    },
+    globals: true,
     coverage: {
+      reporter: ['text', 'html'],
       provider: 'v8',
-      include: ['src/**/*.ts'],
-      exclude: ['**/*.d.ts', 'src/types.ts', 'src/index.ts'],
-      reporter: ['text', 'json', 'html'],
-      all: true,
     },
+    environment: 'node',
+    include: ['tests/**/*.test.ts'],
+    // Exclude performance tests by default (run them with test:perf script)
+    exclude: ['**/node_modules/**', '**/dist/**', '**/*-perf.test.ts'],
   },
 });

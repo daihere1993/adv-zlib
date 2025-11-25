@@ -1,63 +1,58 @@
 {
   "name": "adv-zlib",
   "version": "1.0.5",
-  "description": "The go-to package for working with large and nested ZIP files — fast, efficient, and effortlessly.",
+  "description": "Modern zlib helpers for compressing and inflating Node.js data streams.",
+  "license": "MIT",
   "type": "module",
-  "main": "./dist/cjs/index.cjs",
-  "module": "./dist/esm/index.js",
-  "types": "./dist/types/index.d.ts",
+  "main": "dist/index.cjs",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    },
+    "./package.json": "./package.json"
+  },
   "files": [
     "dist"
   ],
-  "exports": {
-    ".": {
-      "require": "./dist/cjs/index.cjs",
-      "import": "./dist/esm/index.js",
-      "types": "./dist/types/index.d.ts"
-    }
-  },
+  "sideEffects": false,
   "scripts": {
-    "build": "rm -rf dist && pnpm run build:esm && pnpm run build:cjs",
-    "build:esm": "tsc --project tsconfig.esm.json",
-    "build:cjs": "tsc --project tsconfig.cjs.json && node scripts/rename-cjs.js",
-    "test-dual-module": "node scripts/test-dual-module.js",
-    "test": "vitest --no-watch",
-    "test:core": "vitest tests/core --no-watch",
-    "test:performance": "vitest tests/performance --no-watch",
-    "test:integration": "vitest tests/integration --no-watch",
-    "test:watch": "vitest --watch",
-    "coverage": "vitest run --coverage",
-    "typecheck": "tsc --noEmit"
-  },
-  "devDependencies": {
-    "@types/archiver": "^6.0.3",
-    "@types/node": "^20.17.12",
-    "@types/yauzl": "^2.10.0",
-    "@vitest/coverage-v8": "^3.0.4",
-    "adv-zlib": "v0.2.4",
-    "archiver": "^7.0.1",
-    "typescript": "^5.3.3",
-    "vitest": "^3.0.4",
-    "yauzl": "^3.2.0"
+    "dev": "tsup --watch",
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:perf": "vitest run --config vitest.perf.config.ts",
+    "lint": "prettier --check \"src/**\" \"tests/**\"",
+    "format": "prettier --write \"src/**\" \"tests/**\"",
+    "prepare": "husky && pnpm build"
   },
   "engines": {
-    "node": ">=16"
+    "node": ">=18.17"
   },
-  "author": "daihere1993",
-  "homepage": "https://github.com/daihere1993/adv-zlib",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/daihere1993/adv-zlib"
+  "packageManager": "pnpm@9.12.0",
+  "devDependencies": {
+    "@semantic-release/commit-analyzer": "^13.0.0",
+    "@semantic-release/github": "^11.0.0",
+    "@semantic-release/npm": "^12.0.1",
+    "@semantic-release/release-notes-generator": "^14.0.1",
+    "@types/archiver": "^7.0.0",
+    "@types/node": "^22.7.0",
+    "archiver": "^7.0.1",
+    "conventional-changelog-conventionalcommits": "^8.0.0",
+    "husky": "^9.1.7",
+    "prettier": "^3.3.3",
+    "semantic-release": "^24.2.0",
+    "tsup": "^8.3.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.1"
   },
-  "bugs": {
-    "url": "https://github.com/daihere1993/adv-zlib/issues"
-  },
-  "keywords": [
-    "unzip",
-    "zlib",
-    "zip",
-    "stream",
-    "decompression"
-  ],
-  "license": "MIT"
+  "dependencies": {
+    "p-limit": "^7.2.0",
+    "p-queue": "^9.0.0"
+  }
 }
