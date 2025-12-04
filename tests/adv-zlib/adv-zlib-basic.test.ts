@@ -256,6 +256,68 @@ describe('AdvZlib', () => {
       });
     });
 
+    describe('ZIP in Directory Tests (a.zip/subdir/c.zip pattern)', () => {
+      let dirNestedZipPath: string;
+
+      beforeAll(async () => {
+        // Create ZIP with directory containing a nested ZIP (a.zip/subdir/c.zip pattern)
+        // This tests the bug where searchFileName used .split('/').pop() which only got
+        // the filename, but when nested ZIP is in a subdirectory, the full path is needed
+        const nestedInDirZipPath = join(testDir, 'nested-in-subdir.zip');
+        await createTestZip(nestedInDirZipPath, {
+          'deep-file.txt': 'Deep file in nested zip',
+          'another.txt': 'Another file',
+        });
+
+        dirNestedZipPath = join(testDir, 'outer-with-subdir.zip');
+        const nestedInDirBuffer = await readFile(nestedInDirZipPath);
+
+        const archiver = (await import('archiver')).default;
+        const { createWriteStream } = await import('node:fs');
+
+        await new Promise<void>((resolve, reject) => {
+          const output = createWriteStream(dirNestedZipPath);
+          const archive = archiver('zip', { zlib: { level: 9 } });
+
+          output.on('close', () => resolve());
+          output.on('error', reject);
+          archive.on('error', reject);
+          archive.pipe(output);
+
+          // Add the nested zip inside a subdirectory - this is the key pattern
+          archive.append(nestedInDirBuffer, { name: 'symptomreport/log_data/logs.zip' });
+          archive.append('Outer file', { name: 'outer-file.txt' });
+          archive.finalize();
+        });
+      });
+
+      it('should return true for nested ZIP inside subdirectory', async () => {
+        const exists = await advZlib.exists(`${dirNestedZipPath}/symptomreport/log_data/logs.zip`);
+        expect(exists).toBe(true);
+      });
+
+      it('should return true for file inside nested ZIP that is in subdirectory', async () => {
+        const exists = await advZlib.exists(`${dirNestedZipPath}/symptomreport/log_data/logs.zip/deep-file.txt`);
+        expect(exists).toBe(true);
+      });
+
+      it('should return true for another file inside nested ZIP in subdirectory', async () => {
+        const exists = await advZlib.exists(`${dirNestedZipPath}/symptomreport/log_data/logs.zip/another.txt`);
+        expect(exists).toBe(true);
+      });
+
+      it('should return false for non-existent file in nested ZIP in subdirectory', async () => {
+        const exists = await advZlib.exists(`${dirNestedZipPath}/symptomreport/log_data/logs.zip/nonexistent.txt`);
+        expect(exists).toBe(false);
+      });
+
+      it('should return false when searching with just filename (verifies full path is used)', async () => {
+        // This tests that we search for "symptomreport/log_data/logs.zip" not just "logs.zip"
+        const exists = await advZlib.exists(`${dirNestedZipPath}/logs.zip`);
+        expect(exists).toBe(false);
+      });
+    });
+
     describe('Path Normalization Tests', () => {
       it('should handle backslashes converted to forward slashes', async () => {
         // Create a path with backslashes
