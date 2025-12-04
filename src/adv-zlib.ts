@@ -189,8 +189,8 @@ export class AdvZlib {
     }
 
     // Determine what we're searching for
-    // For nested ZIPs, search for just the next ZIP file name, not the full path
-    const searchFileName = isNonNested ? currentInnerPath : pathParts[1]?.zipPath.split('/').pop() || currentInnerPath;
+    // For nested ZIPs, search for the full path to the nested ZIP file (e.g., "subdir/file.zip")
+    const searchFileName = isNonNested ? currentInnerPath : pathParts[1]?.zipPath || currentInnerPath;
 
     // 1. Get the zipfile of the first level and find the entry
     const zipFile = await llzlib.open(currentZipSourcePath);
@@ -479,8 +479,8 @@ export class AdvZlib {
     const isNonNested = pathParts.length === 1;
 
     // Determine what we're searching for
-    // For nested ZIPs, search for just the next ZIP file name, not the full path
-    const searchFileName = isNonNested ? currentInnerPath : pathParts[1]?.zipPath.split('/').pop() || currentInnerPath;
+    // For nested ZIPs, search for the full path to the nested ZIP file (e.g., "subdir/file.zip")
+    const searchFileName = isNonNested ? currentInnerPath : pathParts[1]?.zipPath || currentInnerPath;
 
     // 1. Get the zipfile of the first level and find the entry
     const zipFile = await llzlib.open(currentZipSourcePath);
