@@ -13,6 +13,24 @@ export interface AdvZlibOptions {
   defaultSize?: number;
   retry?: number;
 }
+
+export interface ExtractResult {
+  source: string;
+  success: boolean;
+  error?: Error;
+}
+
+/**
+ * Internal interface for batch extraction tree node
+ */
+interface BatchExtractNode {
+  zipPath: string;
+  filesToExtract: Array<{
+    originalSource: string;
+    innerPath: string;
+  }>;
+  children: Map<string, BatchExtractNode>;
+}
 export class AdvZlib {
   private logger!: Logger;
   private defaultSize: number;
@@ -87,16 +105,19 @@ export class AdvZlib {
   /**
    * Extract a file or entire ZIP contents to a destination path
    *
-   * @param source - The path to extract from. Can be:
+   * @param source - The path(s) to extract from. Can be a single string or array of strings:
    *   - A ZIP file: `/path/to/archive.zip` (extracts all contents)
    *   - A file in a ZIP: `/path/to/archive.zip/file.txt`
    *   - A folder in a ZIP: `/path/to/archive.zip/folder/`
    *   - A nested ZIP: `/path/to/outer.zip/inner.zip/file.txt`
+   *   - An array of paths for batch extraction with shared nested ZIP optimization
    * @param dest - The destination path where files will be extracted
    * @param options - Optional extraction options
    * @param options.noFolders - When true, extracts files using only their base filename,
    *   stripping all folder structure. Only works when extracting a specific file entry.
    *   Will throw an error if used with folder entries or entire ZIP extraction.
+   * @param options.asFile - When true, extracts a nested ZIP file as a file itself rather
+   *   than extracting its contents. Only applies when the target path ends with `.zip`.
    *
    * @example
    * // Extract entire ZIP preserving folder structure
@@ -114,15 +135,63 @@ export class AdvZlib {
    * // Result: /dest/file.txt
    *
    * @example
+   * // Extract from nested ZIP preserving folder structure
+   * await advZlib.extract('/outer.zip/inner.zip/folder/file.txt', '/dest');
+   * // Result: /dest/folder/file.txt
+   *
+   * @example
    * // Extract from nested ZIP without folder structure
    * await advZlib.extract('/outer.zip/inner.zip/folder/file.txt', '/dest', { noFolders: true });
    * // Result: /dest/file.txt
    *
-   * @throws {Error} If source path is invalid or doesn't exist
+   * @example
+   * // Extract nested ZIP as a file (instead of extracting its contents)
+   * await advZlib.extract('/outer.zip/inner.zip', '/dest', { asFile: true });
+   * // Result: /dest/inner.zip (the ZIP file itself, not its contents)
+   *
+   * @example
+   * // Batch extract multiple files from nested ZIPs (optimized - inflates shared ZIPs only once)
+   * const results = await advZlib.extract([
+   *   '/outer.zip/inner.zip/file1.txt',
+   *   '/outer.zip/inner.zip/file2.txt'
+   * ], '/dest');
+   * // Returns: ExtractResult[] with success/failure for each source
+   *
+   * @throws {Error} If source path is invalid or doesn't exist (single source mode)
    * @throws {Error} If noFolders option is used with folder entries or entire ZIP extraction
-   * @throws {Error} If the entry to extract is not found
+   * @throws {Error} If the entry to extract is not found (single source mode)
+   * @returns {Promise<void>} When source is a string
+   * @returns {Promise<ExtractResult[]>} When source is an array - results for each source
    */
-  public async extract(source: string, dest: string, options?: { noFolders?: boolean }): Promise<void> {
+  public async extract(
+    source: string,
+    dest: string,
+    options?: { noFolders?: boolean; asFile?: boolean },
+  ): Promise<void>;
+  public async extract(
+    source: string[],
+    dest: string,
+    options?: { noFolders?: boolean; asFile?: boolean },
+  ): Promise<ExtractResult[]>;
+  public async extract(
+    source: string | string[],
+    dest: string,
+    options?: { noFolders?: boolean; asFile?: boolean },
+  ): Promise<void | ExtractResult[]> {
+    if (typeof source === 'string') {
+      return this.extractSingle(source, dest, options);
+    }
+    return this.extractBatch(source, dest, options);
+  }
+
+  /**
+   * Extract a single source (original extract implementation)
+   */
+  private async extractSingle(
+    source: string,
+    dest: string,
+    options?: { noFolders?: boolean; asFile?: boolean },
+  ): Promise<void> {
     this.logger.debug(`Extracting: ${path.basename(source)} to ${path.basename(dest)}`);
 
     const tmpFiles: string[] = [];
@@ -143,6 +212,257 @@ export class AdvZlib {
           this.logger.debug(`Failed to delete temp file ${tmpFile}: ${error}`);
         }
       }
+    }
+  }
+
+  /**
+   * Extract multiple sources with optimization for shared nested ZIP paths
+   */
+  private async extractBatch(
+    sources: string[],
+    dest: string,
+    options?: { noFolders?: boolean; asFile?: boolean },
+  ): Promise<ExtractResult[]> {
+    if (sources.length === 0) {
+      return [];
+    }
+
+    this.logger.debug(`Batch extracting ${sources.length} files to ${path.basename(dest)}`);
+
+    const results: ExtractResult[] = [];
+    const tmpFiles: string[] = [];
+
+    try {
+      const normalizedDest = this.normalizePath(dest);
+
+      // Build the batch extraction tree grouped by common ZIP paths
+      const rootNodes = this.buildBatchExtractTree(sources);
+
+      // Process each root ZIP node
+      for (const [, node] of rootNodes) {
+        await this.extractBatchFromNode(node, normalizedDest, tmpFiles, results, options ?? {});
+      }
+
+      return results;
+    } finally {
+      for (const tmpFile of tmpFiles) {
+        try {
+          this.logger.debug(`Deleting temp file: ${tmpFile}`);
+          await fs.unlink(tmpFile);
+        } catch (error) {
+          // Ignore errors if file doesn't exist or can't be deleted
+          this.logger.debug(`Failed to delete temp file ${tmpFile}: ${error}`);
+        }
+      }
+    }
+  }
+
+  /**
+   * Extract files from a batch extraction node
+   */
+  private async extractBatchFromNode(
+    node: BatchExtractNode,
+    dest: string,
+    tmpFiles: string[],
+    results: ExtractResult[],
+    options: { noFolders?: boolean; asFile?: boolean },
+  ): Promise<void> {
+    // Check if the zip file exists first
+    if (!(await this.isExistingFileOrFolder(node.zipPath))) {
+      // Fail all sources in this node and its children
+      const error = new Error(`Source zip file ${node.zipPath} does not exist`);
+      this.collectAllSourcesFromNode(node, results, error);
+      return;
+    }
+
+    const zipFile = await llzlib.open(node.zipPath);
+
+    try {
+      const cd = await zipFile.getCentralDirectory();
+      const entryMetadatas = await cd.getAllEntryMetadatas();
+
+      // Create a map for fast lookup
+      const metadataMap = new Map<string, ZipEntryMetadata>();
+      for (const metadata of entryMetadatas) {
+        metadataMap.set(metadata.fileName, metadata);
+      }
+
+      // Extract direct files at this level
+      const limit = pLimit(8);
+      const extractTasks = node.filesToExtract.map((fileToExtract) =>
+        limit(async () => {
+          const { originalSource, innerPath } = fileToExtract;
+
+          // Handle empty innerPath (extract entire ZIP)
+          if (innerPath === '') {
+            if (options.noFolders) {
+              results.push({
+                source: originalSource,
+                success: false,
+                error: new Error('noFolders option cannot be used when extracting entire ZIP contents'),
+              });
+              return;
+            }
+
+            try {
+              const entries = entryMetadatas.map((metadata) => ZipEntry.fromMetadata(zipFile.getReader(), metadata));
+              const entryLimit = pLimit(8);
+              const entryTasks = entries.map((entry) =>
+                entryLimit(async () => {
+                  const targetPath = path.join(dest, entry.fileName);
+                  const targetDir = path.dirname(targetPath);
+                  await fs.mkdir(targetDir, { recursive: true });
+                  const readStream = await entry.createReadStream();
+                  const writeStream = createWriteStream(targetPath);
+                  return pipeline(readStream, writeStream);
+                }),
+              );
+              await Promise.all(entryTasks);
+              results.push({ source: originalSource, success: true });
+            } catch (error) {
+              results.push({
+                source: originalSource,
+                success: false,
+                error: error instanceof Error ? error : new Error(String(error)),
+              });
+            }
+            return;
+          }
+
+          // Find the entry
+          const metadata = metadataMap.get(innerPath);
+          if (!metadata) {
+            results.push({
+              source: originalSource,
+              success: false,
+              error: new Error(`Entry ${innerPath} not found in ${node.zipPath}`),
+            });
+            return;
+          }
+
+          try {
+            const entry = ZipEntry.fromMetadata(zipFile.getReader(), metadata);
+
+            // Check if extracting a folder entry with noFolders option
+            if (options.noFolders && entry.fileName.endsWith('/')) {
+              results.push({
+                source: originalSource,
+                success: false,
+                error: new Error('noFolders option cannot be used when extracting folder entries'),
+              });
+              return;
+            }
+
+            // Use basename if noFolders is true, otherwise use full path
+            const fileName = options.noFolders ? path.basename(entry.fileName) : entry.fileName;
+            const targetPath = path.join(dest, fileName);
+            const targetDir = path.dirname(targetPath);
+            await fs.mkdir(targetDir, { recursive: true });
+            const readStream = await entry.createReadStream();
+            const writeStream = createWriteStream(targetPath);
+            await pipeline(readStream, writeStream);
+
+            results.push({ source: originalSource, success: true });
+          } catch (error) {
+            results.push({
+              source: originalSource,
+              success: false,
+              error: error instanceof Error ? error : new Error(String(error)),
+            });
+          }
+        }),
+      );
+
+      await Promise.all(extractTasks);
+
+      // Process nested ZIPs (children)
+      for (const [nestedZipPath, childNode] of node.children) {
+        const nestedMetadata = metadataMap.get(nestedZipPath);
+        if (!nestedMetadata) {
+          // Nested ZIP not found - fail all sources under this child
+          const error = new Error(`Entry ${nestedZipPath} not found in ${node.zipPath}`);
+          this.collectAllSourcesFromNode(childNode, results, error);
+          continue;
+        }
+
+        // Check if asFile option is set and child targets the nested ZIP itself (empty innerPath)
+        // In this case, extract the nested ZIP as a file instead of recursing
+        const asFileTargets = options.asFile ? childNode.filesToExtract.filter((f) => f.innerPath === '') : [];
+
+        if (asFileTargets.length > 0) {
+          try {
+            const entry = ZipEntry.fromMetadata(zipFile.getReader(), nestedMetadata);
+            // Use basename if noFolders is true, otherwise use full path
+            const fileName = options.noFolders ? path.basename(entry.fileName) : entry.fileName;
+            const targetPath = path.join(dest, fileName);
+            const targetDir = path.dirname(targetPath);
+            await fs.mkdir(targetDir, { recursive: true });
+            const readStream = await entry.createReadStream();
+            const writeStream = createWriteStream(targetPath);
+            this.logger.debug(`Batch: Extracting nested ZIP as file: ${nestedZipPath} to ${targetPath}`);
+            await pipeline(readStream, writeStream);
+
+            // Mark all asFile targets as successful
+            for (const target of asFileTargets) {
+              results.push({ source: target.originalSource, success: true });
+            }
+          } catch (error) {
+            const err = error instanceof Error ? error : new Error(String(error));
+            for (const target of asFileTargets) {
+              results.push({ source: target.originalSource, success: false, error: err });
+            }
+          }
+
+          // Remove the asFile targets from filesToExtract and continue processing remaining
+          childNode.filesToExtract = childNode.filesToExtract.filter((f) => f.innerPath !== '');
+
+          // If no more files to extract and no children, skip this child
+          if (childNode.filesToExtract.length === 0 && childNode.children.size === 0) {
+            continue;
+          }
+        }
+
+        // Extract nested ZIP to temp file (only once!)
+        const tempFilePath = path.join(os.tmpdir(), `temp-${Date.now()}-${Math.random().toString(36).slice(2)}.zip`);
+        tmpFiles.push(tempFilePath);
+
+        try {
+          const entry = ZipEntry.fromMetadata(zipFile.getReader(), nestedMetadata);
+          const readStream = await entry.createReadStream();
+          const writeStream = createWriteStream(tempFilePath);
+          this.logger.debug(`Batch: Extracting nested ZIP ${nestedZipPath} to temp file: ${tempFilePath}`);
+          await pipeline(readStream, writeStream);
+
+          // Update child node's zipPath to the temp file and recurse
+          childNode.zipPath = tempFilePath;
+          await this.extractBatchFromNode(childNode, dest, tmpFiles, results, options);
+        } catch (error) {
+          // Failed to extract nested ZIP - fail all sources under this child
+          const err = error instanceof Error ? error : new Error(String(error));
+          this.collectAllSourcesFromNode(childNode, results, err);
+        }
+      }
+    } finally {
+      zipFile.close();
+    }
+  }
+
+  /**
+   * Collect all sources from a node and its children, marking them as failed
+   */
+  private collectAllSourcesFromNode(node: BatchExtractNode, results: ExtractResult[], error: Error): void {
+    // Add all direct files
+    for (const fileToExtract of node.filesToExtract) {
+      results.push({
+        source: fileToExtract.originalSource,
+        success: false,
+        error,
+      });
+    }
+
+    // Recurse into children
+    for (const [, childNode] of node.children) {
+      this.collectAllSourcesFromNode(childNode, results, error);
     }
   }
 
@@ -263,7 +583,7 @@ export class AdvZlib {
     pathParts: Array<{ zipPath: string; innerPath: string }>,
     dest: string,
     tmpFiles: string[],
-    options: { noFolders?: boolean } = {},
+    options: { noFolders?: boolean; asFile?: boolean } = {},
   ): Promise<void> {
     // Check if the zip file exists first
     if (!(await this.isExistingFileOrFolder(pathParts[0].zipPath))) {
@@ -274,6 +594,10 @@ export class AdvZlib {
     let currentZipSourcePath = pathParts[0].zipPath;
     let currentInnerPath = pathParts[0].innerPath;
     const isNonNested = pathParts.length === 1;
+
+    // Check if we should extract the nested ZIP as a file (asFile option)
+    // This applies when: asFile is true, we have nested ZIPs, and the target is the ZIP itself (empty innerPath in next level)
+    const shouldExtractAsFile = options.asFile && pathParts.length > 1 && pathParts[1].innerPath === '';
 
     // Determine what we're searching for
     // For nested ZIPs, search for the full path to the nested ZIP file (e.g., "subdir/file.zip")
@@ -346,6 +670,20 @@ export class AdvZlib {
 
       if (!selectedEntry) {
         throw new Error(`Entry ${searchFileName} not found in ${currentZipSourcePath}`);
+      }
+
+      // If asFile option is set and we're targeting the nested ZIP itself, extract it as a file
+      if (shouldExtractAsFile) {
+        // Use basename if noFolders is true, otherwise use full path
+        const fileName = options.noFolders ? path.basename(selectedEntry.fileName) : selectedEntry.fileName;
+        const targetPath = path.join(dest, fileName);
+        const targetDir = path.dirname(targetPath);
+        await fs.mkdir(targetDir, { recursive: true });
+        const readStream = await selectedEntry.createReadStream();
+        const writeStream = createWriteStream(targetPath);
+        this.logger.debug(`Extracting nested ZIP as file: ${selectedEntry.fileName} to ${targetPath}`);
+        await pipeline(readStream, writeStream);
+        return;
       }
 
       // 2. For extracting entries in nested ZIPs, we need to extract to a temp file and recurse
@@ -703,5 +1041,76 @@ export class AdvZlib {
 
   private isZipFile(input: string): boolean {
     return input.toLowerCase().endsWith('.zip');
+  }
+
+  /**
+   * Build a tree structure grouping sources by their nested ZIP hierarchy.
+   * This allows extracting multiple files from the same nested ZIP with only one inflation.
+   */
+  private buildBatchExtractTree(sources: string[]): Map<string, BatchExtractNode> {
+    const rootNodes = new Map<string, BatchExtractNode>();
+
+    for (const source of sources) {
+      const normalizedSource = this.normalizePath(source);
+      const pathParts = this.parseNestedPath(normalizedSource);
+
+      if (pathParts.length === 0) {
+        // Invalid source - will be handled during extraction
+        continue;
+      }
+
+      // Get or create root node for the outermost ZIP
+      const rootZipPath = pathParts[0].zipPath;
+      if (!rootNodes.has(rootZipPath)) {
+        rootNodes.set(rootZipPath, {
+          zipPath: rootZipPath,
+          filesToExtract: [],
+          children: new Map(),
+        });
+      }
+
+      const rootNode = rootNodes.get(rootZipPath)!;
+      this.addSourceToNode(rootNode, pathParts, source, 0);
+    }
+
+    return rootNodes;
+  }
+
+  /**
+   * Recursively add a source to the batch extraction tree
+   */
+  private addSourceToNode(
+    node: BatchExtractNode,
+    pathParts: Array<{ zipPath: string; innerPath: string }>,
+    originalSource: string,
+    level: number,
+  ): void {
+    const currentPart = pathParts[level];
+
+    // If this is the last level (no more nested ZIPs)
+    if (level === pathParts.length - 1) {
+      // The innerPath at this level is what we need to extract
+      node.filesToExtract.push({
+        originalSource,
+        innerPath: currentPart.innerPath,
+      });
+      return;
+    }
+
+    // There are more nested ZIPs - we need to recurse
+    const nextPart = pathParts[level + 1];
+    const nextZipPath = nextPart.zipPath;
+
+    // Get or create child node for the next nested ZIP
+    if (!node.children.has(nextZipPath)) {
+      node.children.set(nextZipPath, {
+        zipPath: nextZipPath,
+        filesToExtract: [],
+        children: new Map(),
+      });
+    }
+
+    const childNode = node.children.get(nextZipPath)!;
+    this.addSourceToNode(childNode, pathParts, originalSource, level + 1);
   }
 }
