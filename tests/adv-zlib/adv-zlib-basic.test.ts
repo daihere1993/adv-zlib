@@ -1168,6 +1168,22 @@ describe('AdvZlib', () => {
         const content = await readFile(extractedPath, 'utf-8');
         expect(content).toBe('File in outer zip');
       });
+
+      it('should extract file from subdirectory in nested ZIP preserving folder structure', async () => {
+        const dest = join(extractDestDir, 'nested-subdir-preserve');
+        await mkdir(dest, { recursive: true });
+
+        await advZlib.extract(`${extractOuterZipPath}/inner-extract.zip/subdir/deep.txt`, dest);
+
+        // File should be at dest/subdir/deep.txt (folder structure preserved)
+        const extractedPath = join(dest, 'subdir/deep.txt');
+        const content = await readFile(extractedPath, 'utf-8');
+        expect(content).toBe('Deep file in inner zip');
+
+        // Verify the subdirectory was created
+        const subdirStat = await stat(join(dest, 'subdir'));
+        expect(subdirStat.isDirectory()).toBe(true);
+      });
     });
 
     describe('Deeply Nested ZIP Tests (3+ levels)', () => {
@@ -1545,23 +1561,91 @@ describe('AdvZlib', () => {
       });
     });
 
-    describe('Error Cases', () => {
-      it('should throw error when using noFolders with entire ZIP extraction', async () => {
-        const dest = join(noFoldersDestDir, 'error-entire');
+    describe('noFolders with Folder Content Extraction', () => {
+      it('should extract folder contents without folder structure using noFolders', async () => {
+        const dest = join(noFoldersDestDir, 'folder-nofolders');
         await mkdir(dest, { recursive: true });
 
-        await expect(advZlib.extract(noFoldersSimpleZipPath, dest, { noFolders: true })).rejects.toThrow(
-          /noFolders option cannot be used when extracting entire ZIP contents/,
-        );
+        // Extract all files under myfolder/ with noFolders: true
+        await advZlib.extract(`${noFoldersFolderZipPath}/myfolder/`, dest, { noFolders: true });
+
+        // File should be at dest/file.txt, not dest/myfolder/file.txt
+        const extractedPath = join(dest, 'file.txt');
+        const content = await readFile(extractedPath, 'utf-8');
+        expect(content).toBe('File in folder');
+
+        // Verify myfolder was not created
+        const folderPath = join(dest, 'myfolder');
+        await expect(stat(folderPath)).rejects.toThrow();
       });
 
-      it('should throw error when using noFolders with folder entry', async () => {
-        const dest = join(noFoldersDestDir, 'error-folder');
+      it('should extract multiple files from folder without folder structure', async () => {
+        const dest = join(noFoldersDestDir, 'multi-folder-nofolders');
         await mkdir(dest, { recursive: true });
 
-        await expect(advZlib.extract(`${noFoldersFolderZipPath}/myfolder/`, dest, { noFolders: true })).rejects.toThrow(
-          /noFolders option cannot be used when extracting folder entries/,
-        );
+        // Extract all files under folder1/ with noFolders: true
+        await advZlib.extract(`${noFoldersSimpleZipPath}/folder1/`, dest, { noFolders: true });
+
+        // Files should be extracted with base names only
+        // folder1/file2.txt -> file2.txt
+        // folder1/folder2/file3.txt -> file3.txt
+        const file2Content = await readFile(join(dest, 'file2.txt'), 'utf-8');
+        expect(file2Content).toBe('File in folder1');
+
+        const file3Content = await readFile(join(dest, 'file3.txt'), 'utf-8');
+        expect(file3Content).toBe('File in nested folders');
+
+        // Verify no folders were created
+        await expect(stat(join(dest, 'folder1'))).rejects.toThrow();
+        await expect(stat(join(dest, 'folder2'))).rejects.toThrow();
+      });
+
+      it('should preserve folder structure when extracting folder contents without noFolders', async () => {
+        const dest = join(noFoldersDestDir, 'folder-preserve');
+        await mkdir(dest, { recursive: true });
+
+        // Extract without noFolders (default behavior)
+        await advZlib.extract(`${noFoldersSimpleZipPath}/folder1/`, dest);
+
+        // Files should preserve their full paths
+        const file2Content = await readFile(join(dest, 'folder1', 'file2.txt'), 'utf-8');
+        expect(file2Content).toBe('File in folder1');
+
+        const file3Content = await readFile(join(dest, 'folder1', 'folder2', 'file3.txt'), 'utf-8');
+        expect(file3Content).toBe('File in nested folders');
+      });
+    });
+
+    describe('noFolders with Entire ZIP Extraction', () => {
+      it('should extract entire ZIP without folder structure using noFolders', async () => {
+        const dest = join(noFoldersDestDir, 'entire-zip-nofolders');
+        await mkdir(dest, { recursive: true });
+
+        await advZlib.extract(noFoldersSimpleZipPath, dest, { noFolders: true });
+
+        // All files should be extracted with base names only
+        // file1.txt -> file1.txt (already at root)
+        // folder1/file2.txt -> file2.txt
+        // folder1/folder2/file3.txt -> file3.txt
+        // deep/nested/structure/file4.txt -> file4.txt
+        const file1Content = await readFile(join(dest, 'file1.txt'), 'utf-8');
+        expect(file1Content).toBe('Root file');
+
+        const file2Content = await readFile(join(dest, 'file2.txt'), 'utf-8');
+        expect(file2Content).toBe('File in folder1');
+
+        const file3Content = await readFile(join(dest, 'file3.txt'), 'utf-8');
+        expect(file3Content).toBe('File in nested folders');
+
+        const file4Content = await readFile(join(dest, 'file4.txt'), 'utf-8');
+        expect(file4Content).toBe('Deeply nested file');
+
+        // Verify no folder structure was created
+        const folder1Exists = existsSync(join(dest, 'folder1'));
+        expect(folder1Exists).toBe(false);
+
+        const deepExists = existsSync(join(dest, 'deep'));
+        expect(deepExists).toBe(false);
       });
     });
 
@@ -1594,6 +1678,278 @@ describe('AdvZlib', () => {
 
         expect(content1).toBe('File in folder1');
         expect(content2).toBe('File in nested folders');
+      });
+    });
+  });
+
+  describe('extract() method with asFile option', () => {
+    let asFileOuterZipPath: string;
+    let asFileLevel1ZipPath: string;
+    let asFileSubdirZipPath: string;
+    let asFileDestDir: string;
+
+    beforeAll(async () => {
+      // Create inner ZIP with files
+      const innerAsFileZipPath = join(testDir, 'inner-asfile.zip');
+      await createTestZip(innerAsFileZipPath, {
+        'content.txt': 'Content inside inner zip',
+        'folder/nested.txt': 'Nested content in inner zip',
+      });
+
+      // Create outer ZIP containing the inner ZIP at root
+      asFileOuterZipPath = join(testDir, 'outer-asfile.zip');
+      const { readFile: rf } = await import('node:fs/promises');
+      const innerZipBuffer = await rf(innerAsFileZipPath);
+
+      const archiver = (await import('archiver')).default;
+      const { createWriteStream: cws } = await import('node:fs');
+
+      await new Promise<void>((resolve, reject) => {
+        const output = cws(asFileOuterZipPath);
+        const archive = archiver('zip', { zlib: { level: 9 } });
+
+        output.on('close', () => resolve());
+        output.on('error', reject);
+        archive.on('error', reject);
+        archive.pipe(output);
+
+        archive.append(innerZipBuffer, { name: 'inner-asfile.zip' });
+        archive.append('Outer file content', { name: 'outer.txt' });
+        archive.finalize();
+      });
+
+      // Create outer ZIP with nested ZIP in subdirectory
+      asFileSubdirZipPath = join(testDir, 'outer-asfile-subdir.zip');
+      await new Promise<void>((resolve, reject) => {
+        const output = cws(asFileSubdirZipPath);
+        const archive = archiver('zip', { zlib: { level: 9 } });
+
+        output.on('close', () => resolve());
+        output.on('error', reject);
+        archive.on('error', reject);
+        archive.pipe(output);
+
+        archive.append(innerZipBuffer, { name: 'subdir/inner-asfile.zip' });
+        archive.append('Root file', { name: 'root.txt' });
+        archive.finalize();
+      });
+
+      // Create 3-level nested ZIP structure
+      const level3AsFilePath = join(testDir, 'level3-asfile.zip');
+      await createTestZip(level3AsFilePath, {
+        'deep.txt': 'Deep content',
+      });
+
+      const level2AsFilePath = join(testDir, 'level2-asfile.zip');
+      const level3Buffer = await rf(level3AsFilePath);
+      await new Promise<void>((resolve, reject) => {
+        const output = cws(level2AsFilePath);
+        const archive = archiver('zip', { zlib: { level: 9 } });
+
+        output.on('close', () => resolve());
+        output.on('error', reject);
+        archive.on('error', reject);
+        archive.pipe(output);
+
+        archive.append(level3Buffer, { name: 'level3-asfile.zip' });
+        archive.finalize();
+      });
+
+      asFileLevel1ZipPath = join(testDir, 'level1-asfile.zip');
+      const level2Buffer = await rf(level2AsFilePath);
+      await new Promise<void>((resolve, reject) => {
+        const output = cws(asFileLevel1ZipPath);
+        const archive = archiver('zip', { zlib: { level: 9 } });
+
+        output.on('close', () => resolve());
+        output.on('error', reject);
+        archive.on('error', reject);
+        archive.pipe(output);
+
+        archive.append(level2Buffer, { name: 'level2-asfile.zip' });
+        archive.finalize();
+      });
+
+      // Create destination directory
+      asFileDestDir = join(testDir, 'asfile-dest');
+      await mkdir(asFileDestDir, { recursive: true });
+    });
+
+    afterEach(async () => {
+      // Clean up extracted files after each test
+      try {
+        await rm(asFileDestDir, { recursive: true, force: true });
+        await mkdir(asFileDestDir, { recursive: true });
+      } catch (error) {
+        // Ignore cleanup errors
+      }
+    });
+
+    describe('Basic asFile Functionality', () => {
+      it('should extract nested ZIP as file with asFile: true', async () => {
+        const dest = join(asFileDestDir, 'basic');
+        await mkdir(dest, { recursive: true });
+
+        await advZlib.extract(`${asFileOuterZipPath}/inner-asfile.zip`, dest, { asFile: true });
+
+        // The ZIP file itself should be at dest/inner-asfile.zip
+        const extractedPath = join(dest, 'inner-asfile.zip');
+        const stats = await stat(extractedPath);
+        expect(stats.isFile()).toBe(true);
+        expect(stats.size).toBeGreaterThan(0);
+      });
+
+      it('should extract nested ZIP from subdirectory as file', async () => {
+        const dest = join(asFileDestDir, 'subdir');
+        await mkdir(dest, { recursive: true });
+
+        await advZlib.extract(`${asFileSubdirZipPath}/subdir/inner-asfile.zip`, dest, { asFile: true });
+
+        // The ZIP file should be at dest/subdir/inner-asfile.zip (preserving folder structure)
+        const extractedPath = join(dest, 'subdir/inner-asfile.zip');
+        const stats = await stat(extractedPath);
+        expect(stats.isFile()).toBe(true);
+      });
+
+      it('should extract deeply nested ZIP as file (3 levels)', async () => {
+        const dest = join(asFileDestDir, 'deep');
+        await mkdir(dest, { recursive: true });
+
+        await advZlib.extract(`${asFileLevel1ZipPath}/level2-asfile.zip`, dest, { asFile: true });
+
+        // level2-asfile.zip should be extracted as a file
+        const extractedPath = join(dest, 'level2-asfile.zip');
+        const stats = await stat(extractedPath);
+        expect(stats.isFile()).toBe(true);
+      });
+
+      it('should verify extracted ZIP is valid and can be opened', async () => {
+        const dest = join(asFileDestDir, 'verify');
+        await mkdir(dest, { recursive: true });
+
+        await advZlib.extract(`${asFileOuterZipPath}/inner-asfile.zip`, dest, { asFile: true });
+
+        const extractedZipPath = join(dest, 'inner-asfile.zip');
+
+        // Try to extract contents from the extracted ZIP to verify it's valid
+        const contentDest = join(asFileDestDir, 'verify-content');
+        await mkdir(contentDest, { recursive: true });
+        await advZlib.extract(extractedZipPath, contentDest);
+
+        const content = await readFile(join(contentDest, 'content.txt'), 'utf-8');
+        expect(content).toBe('Content inside inner zip');
+      });
+    });
+
+    describe('asFile combined with noFolders', () => {
+      it('should extract nested ZIP as file without folder structure', async () => {
+        const dest = join(asFileDestDir, 'nofolders');
+        await mkdir(dest, { recursive: true });
+
+        await advZlib.extract(`${asFileSubdirZipPath}/subdir/inner-asfile.zip`, dest, {
+          asFile: true,
+          noFolders: true,
+        });
+
+        // File should be at dest/inner-asfile.zip (no subdir folder)
+        const extractedPath = join(dest, 'inner-asfile.zip');
+        const stats = await stat(extractedPath);
+        expect(stats.isFile()).toBe(true);
+
+        // Verify subdir was not created
+        await expect(stat(join(dest, 'subdir'))).rejects.toThrow();
+      });
+    });
+
+    describe('Default Behavior (asFile: false or undefined)', () => {
+      it('should extract contents of nested ZIP when asFile is false', async () => {
+        const dest = join(asFileDestDir, 'default-false');
+        await mkdir(dest, { recursive: true });
+
+        await advZlib.extract(`${asFileOuterZipPath}/inner-asfile.zip`, dest, { asFile: false });
+
+        // Contents should be extracted, not the ZIP file itself
+        const contentPath = join(dest, 'content.txt');
+        const content = await readFile(contentPath, 'utf-8');
+        expect(content).toBe('Content inside inner zip');
+
+        // The ZIP file should NOT exist at dest
+        await expect(stat(join(dest, 'inner-asfile.zip'))).rejects.toThrow();
+      });
+
+      it('should extract contents of nested ZIP when asFile is undefined', async () => {
+        const dest = join(asFileDestDir, 'default-undefined');
+        await mkdir(dest, { recursive: true });
+
+        await advZlib.extract(`${asFileOuterZipPath}/inner-asfile.zip`, dest);
+
+        // Contents should be extracted
+        const contentPath = join(dest, 'content.txt');
+        const content = await readFile(contentPath, 'utf-8');
+        expect(content).toBe('Content inside inner zip');
+      });
+    });
+
+    describe('asFile with Batch Extraction', () => {
+      it('should extract multiple nested ZIPs as files with batch extraction', async () => {
+        const dest = join(asFileDestDir, 'batch');
+        await mkdir(dest, { recursive: true });
+
+        const results = await advZlib.extract(
+          [`${asFileOuterZipPath}/inner-asfile.zip`, `${asFileSubdirZipPath}/subdir/inner-asfile.zip`],
+          dest,
+          { asFile: true },
+        );
+
+        expect(results).toHaveLength(2);
+        expect(results.every((r) => r.success)).toBe(true);
+
+        // Both ZIP files should be extracted
+        const path1 = join(dest, 'inner-asfile.zip');
+        const path2 = join(dest, 'subdir/inner-asfile.zip');
+        expect((await stat(path1)).isFile()).toBe(true);
+        expect((await stat(path2)).isFile()).toBe(true);
+      });
+
+      it('should extract nested ZIP as file with batch and noFolders', async () => {
+        const dest = join(asFileDestDir, 'batch-nofolders');
+        await mkdir(dest, { recursive: true });
+
+        const results = await advZlib.extract([`${asFileSubdirZipPath}/subdir/inner-asfile.zip`], dest, {
+          asFile: true,
+          noFolders: true,
+        });
+
+        expect(results).toHaveLength(1);
+        expect(results[0].success).toBe(true);
+
+        // File should be at root without subdir
+        const extractedPath = join(dest, 'inner-asfile.zip');
+        expect((await stat(extractedPath)).isFile()).toBe(true);
+      });
+    });
+
+    describe('asFile with Non-ZIP entries', () => {
+      it('should extract regular file normally even with asFile: true', async () => {
+        const dest = join(asFileDestDir, 'regular-file');
+        await mkdir(dest, { recursive: true });
+
+        // asFile has no effect on non-ZIP entries
+        await advZlib.extract(`${asFileOuterZipPath}/outer.txt`, dest, { asFile: true });
+
+        const content = await readFile(join(dest, 'outer.txt'), 'utf-8');
+        expect(content).toBe('Outer file content');
+      });
+
+      it('should extract file from nested ZIP normally with asFile: true but with inner path', async () => {
+        const dest = join(asFileDestDir, 'nested-file');
+        await mkdir(dest, { recursive: true });
+
+        // When there's an inner path after the nested ZIP, asFile doesn't apply
+        await advZlib.extract(`${asFileOuterZipPath}/inner-asfile.zip/content.txt`, dest, { asFile: true });
+
+        const content = await readFile(join(dest, 'content.txt'), 'utf-8');
+        expect(content).toBe('Content inside inner zip');
       });
     });
   });
@@ -1938,6 +2294,696 @@ describe('AdvZlib', () => {
 
         // All temp files should be cleaned up
         expect(afterFiles.length).toBe(beforeFiles.length);
+      });
+    });
+  });
+
+  describe('extract() method with batch sources (array)', () => {
+    let batchOuterZipPath: string;
+    let batchLevel1ZipPath: string;
+    let batchDestDir: string;
+
+    beforeAll(async () => {
+      // Create inner ZIP A with multiple files
+      const innerAZipPath = join(testDir, 'inner-a-batch.zip');
+      await createTestZip(innerAZipPath, {
+        'a1.txt': 'Content of a1',
+        'a2.txt': 'Content of a2',
+        'folder/a3.txt': 'Content of a3 in folder',
+      });
+
+      // Create inner ZIP B
+      const innerBZipPath = join(testDir, 'inner-b-batch.zip');
+      await createTestZip(innerBZipPath, {
+        'b1.txt': 'Content of b1',
+      });
+
+      // Create inner ZIP C (to be placed in a subdirectory)
+      const innerCZipPath = join(testDir, 'inner-c-batch.zip');
+      await createTestZip(innerCZipPath, {
+        'c1.txt': 'Content of c1',
+      });
+
+      // Create outer ZIP containing inner-a.zip, inner-b.zip, and deep/inner-c.zip
+      batchOuterZipPath = join(testDir, 'outer-batch.zip');
+      const { readFile: rf } = await import('node:fs/promises');
+      const innerABuffer = await rf(innerAZipPath);
+      const innerBBuffer = await rf(innerBZipPath);
+      const innerCBuffer = await rf(innerCZipPath);
+
+      const archiver = (await import('archiver')).default;
+      const { createWriteStream: cws } = await import('node:fs');
+
+      await new Promise<void>((resolve, reject) => {
+        const output = cws(batchOuterZipPath);
+        const archive = archiver('zip', { zlib: { level: 9 } });
+
+        output.on('close', () => resolve());
+        output.on('error', reject);
+        archive.on('error', reject);
+        archive.pipe(output);
+
+        archive.append('Root file content', { name: 'root-file.txt' });
+        archive.append(innerABuffer, { name: 'inner-a.zip' });
+        archive.append(innerBBuffer, { name: 'inner-b.zip' });
+        archive.append(innerCBuffer, { name: 'deep/inner-c.zip' });
+        archive.finalize();
+      });
+
+      // Create deeply nested ZIP (level1 → level2 → level3)
+      const level3BatchPath = join(testDir, 'level3-batch.zip');
+      await createTestZip(level3BatchPath, {
+        'deep1.txt': 'Deep content 1',
+        'deep2.txt': 'Deep content 2',
+      });
+
+      const level2BatchPath = join(testDir, 'level2-batch.zip');
+      const level3Buffer = await rf(level3BatchPath);
+      await new Promise<void>((resolve, reject) => {
+        const output = cws(level2BatchPath);
+        const archive = archiver('zip', { zlib: { level: 9 } });
+
+        output.on('close', () => resolve());
+        output.on('error', reject);
+        archive.on('error', reject);
+        archive.pipe(output);
+
+        archive.append(level3Buffer, { name: 'level3-batch.zip' });
+        archive.finalize();
+      });
+
+      batchLevel1ZipPath = join(testDir, 'level1-batch.zip');
+      const level2Buffer = await rf(level2BatchPath);
+      await new Promise<void>((resolve, reject) => {
+        const output = cws(batchLevel1ZipPath);
+        const archive = archiver('zip', { zlib: { level: 9 } });
+
+        output.on('close', () => resolve());
+        output.on('error', reject);
+        archive.on('error', reject);
+        archive.pipe(output);
+
+        archive.append(level2Buffer, { name: 'level2-batch.zip' });
+        archive.finalize();
+      });
+
+      // Create destination directory
+      batchDestDir = join(testDir, 'batch-dest');
+      await mkdir(batchDestDir, { recursive: true });
+    });
+
+    afterEach(async () => {
+      // Clean up extracted files after each test
+      try {
+        await rm(batchDestDir, { recursive: true, force: true });
+        await mkdir(batchDestDir, { recursive: true });
+      } catch (error) {
+        // Ignore cleanup errors
+      }
+    });
+
+    describe('Basic Batch Extraction', () => {
+      it('should extract multiple files from same nested ZIP', async () => {
+        const dest = join(batchDestDir, 'same-nested');
+        await mkdir(dest, { recursive: true });
+
+        const results = await advZlib.extract(
+          [`${batchOuterZipPath}/inner-a.zip/a1.txt`, `${batchOuterZipPath}/inner-a.zip/a2.txt`],
+          dest,
+        );
+
+        expect(results).toHaveLength(2);
+        expect(results.every((r) => r.success)).toBe(true);
+
+        const content1 = await readFile(join(dest, 'a1.txt'), 'utf-8');
+        const content2 = await readFile(join(dest, 'a2.txt'), 'utf-8');
+        expect(content1).toBe('Content of a1');
+        expect(content2).toBe('Content of a2');
+      });
+
+      it('should extract files from different nested ZIPs', async () => {
+        const dest = join(batchDestDir, 'different-nested');
+        await mkdir(dest, { recursive: true });
+
+        const results = await advZlib.extract(
+          [`${batchOuterZipPath}/inner-a.zip/a1.txt`, `${batchOuterZipPath}/inner-b.zip/b1.txt`],
+          dest,
+        );
+
+        expect(results).toHaveLength(2);
+        expect(results.every((r) => r.success)).toBe(true);
+
+        const contentA = await readFile(join(dest, 'a1.txt'), 'utf-8');
+        const contentB = await readFile(join(dest, 'b1.txt'), 'utf-8');
+        expect(contentA).toBe('Content of a1');
+        expect(contentB).toBe('Content of b1');
+      });
+
+      it('should extract mix of root and nested files', async () => {
+        const dest = join(batchDestDir, 'mix-root-nested');
+        await mkdir(dest, { recursive: true });
+
+        const results = await advZlib.extract(
+          [`${batchOuterZipPath}/root-file.txt`, `${batchOuterZipPath}/inner-a.zip/a1.txt`],
+          dest,
+        );
+
+        expect(results).toHaveLength(2);
+        expect(results.every((r) => r.success)).toBe(true);
+
+        const rootContent = await readFile(join(dest, 'root-file.txt'), 'utf-8');
+        const nestedContent = await readFile(join(dest, 'a1.txt'), 'utf-8');
+        expect(rootContent).toBe('Root file content');
+        expect(nestedContent).toBe('Content of a1');
+      });
+
+      it('should return results array with all successes', async () => {
+        const dest = join(batchDestDir, 'all-success');
+        await mkdir(dest, { recursive: true });
+
+        const sources = [
+          `${batchOuterZipPath}/inner-a.zip/a1.txt`,
+          `${batchOuterZipPath}/inner-a.zip/a2.txt`,
+          `${batchOuterZipPath}/inner-b.zip/b1.txt`,
+        ];
+
+        const results = await advZlib.extract(sources, dest);
+
+        expect(results).toHaveLength(3);
+        for (let i = 0; i < sources.length; i++) {
+          expect(results[i].source).toBe(sources[i]);
+          expect(results[i].success).toBe(true);
+          expect(results[i].error).toBeUndefined();
+        }
+      });
+    });
+
+    describe('Error Handling', () => {
+      it('should continue after individual file not found', async () => {
+        const dest = join(batchDestDir, 'partial-failure');
+        await mkdir(dest, { recursive: true });
+
+        const results = await advZlib.extract(
+          [`${batchOuterZipPath}/inner-a.zip/a1.txt`, `${batchOuterZipPath}/inner-a.zip/missing.txt`],
+          dest,
+        );
+
+        expect(results).toHaveLength(2);
+
+        const successResult = results.find((r) => r.source.includes('a1.txt'));
+        const failResult = results.find((r) => r.source.includes('missing.txt'));
+
+        expect(successResult?.success).toBe(true);
+        expect(failResult?.success).toBe(false);
+        expect(failResult?.error).toBeDefined();
+        expect(failResult?.error?.message).toContain('not found');
+
+        // Verify successful file was actually extracted
+        const content = await readFile(join(dest, 'a1.txt'), 'utf-8');
+        expect(content).toBe('Content of a1');
+      });
+
+      it('should fail all files when nested ZIP not found', async () => {
+        const dest = join(batchDestDir, 'nested-not-found');
+        await mkdir(dest, { recursive: true });
+
+        const results = await advZlib.extract(
+          [`${batchOuterZipPath}/missing.zip/a.txt`, `${batchOuterZipPath}/missing.zip/b.txt`],
+          dest,
+        );
+
+        expect(results).toHaveLength(2);
+        expect(results.every((r) => !r.success)).toBe(true);
+        expect(results.every((r) => r.error?.message.includes('not found'))).toBe(true);
+      });
+
+      it('should return partial results on mixed success/failure', async () => {
+        const dest = join(batchDestDir, 'mixed-results');
+        await mkdir(dest, { recursive: true });
+
+        const results = await advZlib.extract(
+          [
+            `${batchOuterZipPath}/inner-a.zip/a1.txt`,
+            `${batchOuterZipPath}/inner-a.zip/missing.txt`,
+            `${batchOuterZipPath}/inner-b.zip/b1.txt`,
+          ],
+          dest,
+        );
+
+        expect(results).toHaveLength(3);
+
+        const successCount = results.filter((r) => r.success).length;
+        const failCount = results.filter((r) => !r.success).length;
+
+        expect(successCount).toBe(2);
+        expect(failCount).toBe(1);
+      });
+
+      it('should include error details in failed results', async () => {
+        const dest = join(batchDestDir, 'error-details');
+        await mkdir(dest, { recursive: true });
+
+        const results = await advZlib.extract([`${batchOuterZipPath}/inner-a.zip/nonexistent.txt`], dest);
+
+        expect(results).toHaveLength(1);
+        expect(results[0].success).toBe(false);
+        expect(results[0].error).toBeInstanceOf(Error);
+        expect(results[0].error?.message).toBeTruthy();
+      });
+    });
+
+    describe('Edge Cases', () => {
+      it('should handle empty source array', async () => {
+        const dest = join(batchDestDir, 'empty-array');
+        await mkdir(dest, { recursive: true });
+
+        const results = await advZlib.extract([], dest);
+
+        expect(results).toEqual([]);
+      });
+
+      it('should handle single-item array', async () => {
+        const dest = join(batchDestDir, 'single-item');
+        await mkdir(dest, { recursive: true });
+
+        const results = await advZlib.extract([`${batchOuterZipPath}/inner-a.zip/a1.txt`], dest);
+
+        expect(results).toHaveLength(1);
+        expect(results[0].success).toBe(true);
+
+        const content = await readFile(join(dest, 'a1.txt'), 'utf-8');
+        expect(content).toBe('Content of a1');
+      });
+
+      it('should handle duplicate sources', async () => {
+        const dest = join(batchDestDir, 'duplicates');
+        await mkdir(dest, { recursive: true });
+
+        const results = await advZlib.extract(
+          [`${batchOuterZipPath}/inner-a.zip/a1.txt`, `${batchOuterZipPath}/inner-a.zip/a1.txt`],
+          dest,
+        );
+
+        expect(results).toHaveLength(2);
+        expect(results.every((r) => r.success)).toBe(true);
+      });
+
+      it('should work with noFolders option', async () => {
+        const dest = join(batchDestDir, 'no-folders');
+        await mkdir(dest, { recursive: true });
+
+        const results = await advZlib.extract([`${batchOuterZipPath}/inner-a.zip/folder/a3.txt`], dest, {
+          noFolders: true,
+        });
+
+        expect(results).toHaveLength(1);
+        expect(results[0].success).toBe(true);
+
+        // File should be at dest/a3.txt, not dest/folder/a3.txt
+        const content = await readFile(join(dest, 'a3.txt'), 'utf-8');
+        expect(content).toBe('Content of a3 in folder');
+
+        // Verify folder was not created
+        await expect(stat(join(dest, 'folder'))).rejects.toThrow();
+      });
+
+      it('should extract from nested ZIP in subdirectory', async () => {
+        const dest = join(batchDestDir, 'nested-subdir');
+        await mkdir(dest, { recursive: true });
+
+        const results = await advZlib.extract([`${batchOuterZipPath}/deep/inner-c.zip/c1.txt`], dest);
+
+        expect(results).toHaveLength(1);
+        expect(results[0].success).toBe(true);
+
+        const content = await readFile(join(dest, 'c1.txt'), 'utf-8');
+        expect(content).toBe('Content of c1');
+      });
+    });
+
+    describe('Deeply Nested (3+ levels)', () => {
+      it('should extract from 3-level nested ZIPs', async () => {
+        const dest = join(batchDestDir, 'deep-nested');
+        await mkdir(dest, { recursive: true });
+
+        const results = await advZlib.extract(
+          [
+            `${batchLevel1ZipPath}/level2-batch.zip/level3-batch.zip/deep1.txt`,
+            `${batchLevel1ZipPath}/level2-batch.zip/level3-batch.zip/deep2.txt`,
+          ],
+          dest,
+        );
+
+        expect(results).toHaveLength(2);
+        expect(results.every((r) => r.success)).toBe(true);
+
+        const content1 = await readFile(join(dest, 'deep1.txt'), 'utf-8');
+        const content2 = await readFile(join(dest, 'deep2.txt'), 'utf-8');
+        expect(content1).toBe('Deep content 1');
+        expect(content2).toBe('Deep content 2');
+      });
+    });
+
+    describe('Cleanup Verification', () => {
+      it('should cleanup temp files after successful batch extraction', async () => {
+        const dest = join(batchDestDir, 'cleanup-success');
+        await mkdir(dest, { recursive: true });
+
+        const tempDir = tmpdir();
+        const beforeFiles = readdirSync(tempDir).filter((f) => f.startsWith('temp-'));
+
+        await advZlib.extract(
+          [`${batchOuterZipPath}/inner-a.zip/a1.txt`, `${batchOuterZipPath}/inner-a.zip/a2.txt`],
+          dest,
+        );
+
+        const afterFiles = readdirSync(tempDir).filter((f) => f.startsWith('temp-'));
+        expect(afterFiles.length).toBe(beforeFiles.length);
+      });
+
+      it('should cleanup temp files after partial failure', async () => {
+        const dest = join(batchDestDir, 'cleanup-failure');
+        await mkdir(dest, { recursive: true });
+
+        const tempDir = tmpdir();
+        const beforeFiles = readdirSync(tempDir).filter((f) => f.startsWith('temp-'));
+
+        await advZlib.extract(
+          [`${batchOuterZipPath}/inner-a.zip/a1.txt`, `${batchOuterZipPath}/inner-a.zip/missing.txt`],
+          dest,
+        );
+
+        const afterFiles = readdirSync(tempDir).filter((f) => f.startsWith('temp-'));
+        expect(afterFiles.length).toBe(beforeFiles.length);
+      });
+    });
+
+    describe('Backward Compatibility', () => {
+      it('should maintain single-source behavior (returns void)', async () => {
+        const dest = join(batchDestDir, 'single-compat');
+        await mkdir(dest, { recursive: true });
+
+        // Single source should return void (no explicit return value)
+        const result = await advZlib.extract(`${batchOuterZipPath}/inner-a.zip/a1.txt`, dest);
+        expect(result).toBeUndefined();
+
+        const content = await readFile(join(dest, 'a1.txt'), 'utf-8');
+        expect(content).toBe('Content of a1');
+      });
+
+      it('should throw error for single-source when entry not found', async () => {
+        const dest = join(batchDestDir, 'single-error');
+        await mkdir(dest, { recursive: true });
+
+        await expect(advZlib.extract(`${batchOuterZipPath}/inner-a.zip/nonexistent.txt`, dest)).rejects.toThrow(
+          /not found/,
+        );
+      });
+    });
+  });
+
+  describe('extract() method with folder content extraction', () => {
+    let folderExtractZipPath: string;
+    let folderExtractNestedOuterPath: string;
+    let folderExtractDestDir: string;
+
+    beforeAll(async () => {
+      // Create ZIP with folder structure for testing
+      folderExtractZipPath = join(testDir, 'folder-extract.zip');
+      await createTestZip(folderExtractZipPath, {
+        'folder/': null,
+        'folder/file1.txt': 'Content of file1',
+        'folder/file2.txt': 'Content of file2',
+        'folder/sub/': null,
+        'folder/sub/deep.txt': 'Deep file content',
+        'folder/sub/another.txt': 'Another deep file',
+        'other/': null,
+        'other/file.txt': 'File in other folder',
+        'root.txt': 'Root level file',
+        'empty-folder/': null,
+      });
+
+      // Create nested ZIP with folder structure
+      const innerFolderZipPath = join(testDir, 'inner-folder.zip');
+      await createTestZip(innerFolderZipPath, {
+        'data/': null,
+        'data/item1.txt': 'Item 1 content',
+        'data/item2.txt': 'Item 2 content',
+        'data/nested/': null,
+        'data/nested/deep.txt': 'Nested deep content',
+      });
+
+      folderExtractNestedOuterPath = join(testDir, 'outer-folder-extract.zip');
+      const { readFile: rf } = await import('node:fs/promises');
+      const innerZipBuffer = await rf(innerFolderZipPath);
+
+      const archiver = (await import('archiver')).default;
+      const { createWriteStream: cws } = await import('node:fs');
+
+      await new Promise<void>((resolve, reject) => {
+        const output = cws(folderExtractNestedOuterPath);
+        const archive = archiver('zip', { zlib: { level: 9 } });
+
+        output.on('close', () => resolve());
+        output.on('error', reject);
+        archive.on('error', reject);
+        archive.pipe(output);
+
+        archive.append(innerZipBuffer, { name: 'inner-folder.zip' });
+        archive.append('Outer file', { name: 'outer.txt' });
+        archive.finalize();
+      });
+
+      // Create destination directory
+      folderExtractDestDir = join(testDir, 'folder-extract-dest');
+      await mkdir(folderExtractDestDir, { recursive: true });
+    });
+
+    afterEach(async () => {
+      // Clean up extracted files after each test
+      try {
+        await rm(folderExtractDestDir, { recursive: true, force: true });
+        await mkdir(folderExtractDestDir, { recursive: true });
+      } catch (error) {
+        // Ignore cleanup errors
+      }
+    });
+
+    describe('Basic Folder Content Extraction', () => {
+      it('should extract all entries under a folder', async () => {
+        const dest = join(folderExtractDestDir, 'basic');
+        await mkdir(dest, { recursive: true });
+
+        await advZlib.extract(`${folderExtractZipPath}/folder/`, dest);
+
+        // Check that all files under folder/ were extracted
+        const file1Content = await readFile(join(dest, 'folder/file1.txt'), 'utf-8');
+        expect(file1Content).toBe('Content of file1');
+
+        const file2Content = await readFile(join(dest, 'folder/file2.txt'), 'utf-8');
+        expect(file2Content).toBe('Content of file2');
+
+        const deepContent = await readFile(join(dest, 'folder/sub/deep.txt'), 'utf-8');
+        expect(deepContent).toBe('Deep file content');
+
+        const anotherContent = await readFile(join(dest, 'folder/sub/another.txt'), 'utf-8');
+        expect(anotherContent).toBe('Another deep file');
+
+        // Verify other folder was not extracted
+        const otherExists = existsSync(join(dest, 'other'));
+        expect(otherExists).toBe(false);
+
+        // Verify root file was not extracted
+        const rootExists = existsSync(join(dest, 'root.txt'));
+        expect(rootExists).toBe(false);
+      });
+
+      it('should extract nested subfolder only', async () => {
+        const dest = join(folderExtractDestDir, 'subfolder');
+        await mkdir(dest, { recursive: true });
+
+        await advZlib.extract(`${folderExtractZipPath}/folder/sub/`, dest);
+
+        // Check that only sub/ contents were extracted
+        const deepContent = await readFile(join(dest, 'folder/sub/deep.txt'), 'utf-8');
+        expect(deepContent).toBe('Deep file content');
+
+        const anotherContent = await readFile(join(dest, 'folder/sub/another.txt'), 'utf-8');
+        expect(anotherContent).toBe('Another deep file');
+
+        // Verify folder/file1.txt was not extracted (it's not under folder/sub/)
+        const file1Exists = existsSync(join(dest, 'folder/file1.txt'));
+        expect(file1Exists).toBe(false);
+      });
+
+      it('should throw error when no entries found under folder', async () => {
+        const dest = join(folderExtractDestDir, 'nonexistent');
+        await mkdir(dest, { recursive: true });
+
+        await expect(advZlib.extract(`${folderExtractZipPath}/nonexistent-folder/`, dest)).rejects.toThrow(
+          /No entries found under folder/,
+        );
+      });
+
+      it('should extract folder contents with base names only when using noFolders', async () => {
+        const dest = join(folderExtractDestDir, 'nofolders-folder');
+        await mkdir(dest, { recursive: true });
+
+        await advZlib.extract(`${folderExtractZipPath}/folder/`, dest, { noFolders: true });
+
+        // All files should be extracted with base names only
+        const file1Content = await readFile(join(dest, 'file1.txt'), 'utf-8');
+        expect(file1Content).toBe('Content of file1');
+
+        const file2Content = await readFile(join(dest, 'file2.txt'), 'utf-8');
+        expect(file2Content).toBe('Content of file2');
+
+        const deepContent = await readFile(join(dest, 'deep.txt'), 'utf-8');
+        expect(deepContent).toBe('Deep file content');
+
+        const anotherContent = await readFile(join(dest, 'another.txt'), 'utf-8');
+        expect(anotherContent).toBe('Another deep file');
+
+        // Verify no folder structure was created
+        const folderExists = existsSync(join(dest, 'folder'));
+        expect(folderExists).toBe(false);
+
+        const subExists = existsSync(join(dest, 'sub'));
+        expect(subExists).toBe(false);
+      });
+    });
+
+    describe('Nested ZIP Folder Content Extraction', () => {
+      it('should extract folder contents from nested ZIP', async () => {
+        const dest = join(folderExtractDestDir, 'nested');
+        await mkdir(dest, { recursive: true });
+
+        await advZlib.extract(`${folderExtractNestedOuterPath}/inner-folder.zip/data/`, dest);
+
+        // Check that data/ contents were extracted
+        const item1Content = await readFile(join(dest, 'data/item1.txt'), 'utf-8');
+        expect(item1Content).toBe('Item 1 content');
+
+        const item2Content = await readFile(join(dest, 'data/item2.txt'), 'utf-8');
+        expect(item2Content).toBe('Item 2 content');
+
+        const deepContent = await readFile(join(dest, 'data/nested/deep.txt'), 'utf-8');
+        expect(deepContent).toBe('Nested deep content');
+      });
+
+      it('should extract nested subfolder from nested ZIP', async () => {
+        const dest = join(folderExtractDestDir, 'nested-sub');
+        await mkdir(dest, { recursive: true });
+
+        await advZlib.extract(`${folderExtractNestedOuterPath}/inner-folder.zip/data/nested/`, dest);
+
+        // Only nested/ contents should be extracted
+        const deepContent = await readFile(join(dest, 'data/nested/deep.txt'), 'utf-8');
+        expect(deepContent).toBe('Nested deep content');
+
+        // item1.txt should not be extracted (not under data/nested/)
+        const item1Exists = existsSync(join(dest, 'data/item1.txt'));
+        expect(item1Exists).toBe(false);
+      });
+    });
+
+    describe('Batch Folder Content Extraction', () => {
+      it('should extract folder contents in batch mode', async () => {
+        const dest = join(folderExtractDestDir, 'batch');
+        await mkdir(dest, { recursive: true });
+
+        const results = await advZlib.extract(
+          [`${folderExtractZipPath}/folder/`, `${folderExtractZipPath}/other/`],
+          dest,
+        );
+
+        expect(results).toHaveLength(2);
+        expect(results[0].success).toBe(true);
+        expect(results[1].success).toBe(true);
+
+        // Check folder/ contents
+        const file1Content = await readFile(join(dest, 'folder/file1.txt'), 'utf-8');
+        expect(file1Content).toBe('Content of file1');
+
+        // Check other/ contents
+        const otherContent = await readFile(join(dest, 'other/file.txt'), 'utf-8');
+        expect(otherContent).toBe('File in other folder');
+      });
+
+      it('should handle mixed batch with files and folders', async () => {
+        const dest = join(folderExtractDestDir, 'batch-mixed');
+        await mkdir(dest, { recursive: true });
+
+        const results = await advZlib.extract(
+          [`${folderExtractZipPath}/folder/sub/`, `${folderExtractZipPath}/root.txt`],
+          dest,
+        );
+
+        expect(results).toHaveLength(2);
+        expect(results[0].success).toBe(true);
+        expect(results[1].success).toBe(true);
+
+        // Check folder/sub/ contents
+        const deepContent = await readFile(join(dest, 'folder/sub/deep.txt'), 'utf-8');
+        expect(deepContent).toBe('Deep file content');
+
+        // Check root.txt
+        const rootContent = await readFile(join(dest, 'root.txt'), 'utf-8');
+        expect(rootContent).toBe('Root level file');
+      });
+
+      it('should report failure for non-existent folder in batch', async () => {
+        const dest = join(folderExtractDestDir, 'batch-fail');
+        await mkdir(dest, { recursive: true });
+
+        const results = await advZlib.extract(
+          [`${folderExtractZipPath}/folder/`, `${folderExtractZipPath}/nonexistent/`],
+          dest,
+        );
+
+        expect(results).toHaveLength(2);
+
+        // Find results by source path (order may vary due to parallel execution)
+        const folderResult = results.find((r) => r.source.includes('/folder/'));
+        const nonexistentResult = results.find((r) => r.source.includes('/nonexistent/'));
+
+        expect(folderResult?.success).toBe(true);
+        expect(nonexistentResult?.success).toBe(false);
+        expect(nonexistentResult?.error?.message).toMatch(/No entries found under folder/);
+      });
+
+      it('should extract folder contents with base names in batch mode when using noFolders', async () => {
+        const dest = join(folderExtractDestDir, 'batch-nofolders');
+        await mkdir(dest, { recursive: true });
+
+        const results = await advZlib.extract([`${folderExtractZipPath}/folder/`], dest, { noFolders: true });
+
+        expect(results).toHaveLength(1);
+        expect(results[0].success).toBe(true);
+
+        // All files should be extracted with base names only
+        const file1Content = await readFile(join(dest, 'file1.txt'), 'utf-8');
+        expect(file1Content).toBe('Content of file1');
+
+        const file2Content = await readFile(join(dest, 'file2.txt'), 'utf-8');
+        expect(file2Content).toBe('Content of file2');
+
+        // Verify no folder structure was created
+        const folderExists = existsSync(join(dest, 'folder'));
+        expect(folderExists).toBe(false);
+      });
+
+      it('should extract folder contents from nested ZIP in batch mode', async () => {
+        const dest = join(folderExtractDestDir, 'batch-nested');
+        await mkdir(dest, { recursive: true });
+
+        const results = await advZlib.extract([`${folderExtractNestedOuterPath}/inner-folder.zip/data/`], dest);
+
+        expect(results).toHaveLength(1);
+        expect(results[0].success).toBe(true);
+
+        const item1Content = await readFile(join(dest, 'data/item1.txt'), 'utf-8');
+        expect(item1Content).toBe('Item 1 content');
       });
     });
   });
