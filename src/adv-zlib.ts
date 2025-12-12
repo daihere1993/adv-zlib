@@ -114,8 +114,11 @@ export class AdvZlib {
    * @param dest - The destination path where files will be extracted
    * @param options - Optional extraction options
    * @param options.noFolders - When true, extracts files using only their base filename,
-   *   stripping all folder structure. Only works when extracting a specific file entry.
-   *   Will throw an error if used with folder entries or entire ZIP extraction.
+   *   stripping all folder structure. Works for all extraction scenarios:
+   *   - Entire ZIP: `/archive.zip` → all files extracted with base names only
+   *   - A specific file entry: `/archive.zip/folder/file.txt` → `/dest/file.txt`
+   *   - Folder contents (trailing slash): `/archive.zip/folder/` → all files extracted with base names only
+   *   Directory entries are automatically skipped (only files are extracted).
    * @param options.asFile - When true, extracts a nested ZIP file as a file itself rather
    *   than extracting its contents. Only applies when the target path ends with `.zip`.
    *
@@ -125,14 +128,31 @@ export class AdvZlib {
    * // Result: /dest/folder/file.txt
    *
    * @example
+   * // Extract entire ZIP without folder structure (all files with base names only)
+   * await advZlib.extract('/path/to/archive.zip', '/dest', { noFolders: true });
+   * // If archive contains: folder/a.txt, folder/sub/b.txt
+   * // Result: /dest/a.txt, /dest/b.txt (base names only, no folder structure)
+   *
+   * @example
    * // Extract specific file preserving folder structure
    * await advZlib.extract('/path/to/archive.zip/folder/file.txt', '/dest');
    * // Result: /dest/folder/file.txt
    *
    * @example
+   * // Extract all entries under a folder (note trailing slash)
+   * await advZlib.extract('/path/to/archive.zip/folder/', '/dest');
+   * // Result: /dest/folder/file1.txt, /dest/folder/sub/file2.txt, etc.
+   *
+   * @example
    * // Extract specific file without folder structure
    * await advZlib.extract('/path/to/archive.zip/folder/file.txt', '/dest', { noFolders: true });
    * // Result: /dest/file.txt
+   *
+   * @example
+   * // Extract folder contents without folder structure (all files extracted with base names only)
+   * await advZlib.extract('/path/to/archive.zip/folder1/folder2/', '/dest', { noFolders: true });
+   * // If archive contains: folder1/folder2/a.txt, folder1/folder2/sub/b.txt
+   * // Result: /dest/a.txt, /dest/b.txt (base names only, no folder structure)
    *
    * @example
    * // Extract from nested ZIP preserving folder structure
@@ -158,7 +178,6 @@ export class AdvZlib {
    * // Returns: ExtractResult[] with success/failure for each source
    *
    * @throws {Error} If source path is invalid or doesn't exist (single source mode)
-   * @throws {Error} If noFolders option is used with folder entries or entire ZIP extraction
    * @throws {Error} If the entry to extract is not found (single source mode)
    * @returns {Promise<void>} When source is a string
    * @returns {Promise<ExtractResult[]>} When source is an array - results for each source
@@ -295,21 +314,61 @@ export class AdvZlib {
 
           // Handle empty innerPath (extract entire ZIP)
           if (innerPath === '') {
-            if (options.noFolders) {
-              results.push({
-                source: originalSource,
-                success: false,
-                error: new Error('noFolders option cannot be used when extracting entire ZIP contents'),
-              });
-              return;
-            }
-
             try {
-              const entries = entryMetadatas.map((metadata) => ZipEntry.fromMetadata(zipFile.getReader(), metadata));
+              // Filter out directory entries when extracting
+              const fileMetadatas = entryMetadatas.filter((m) => !m.fileName.endsWith('/'));
+              const entries = fileMetadatas.map((metadata) => ZipEntry.fromMetadata(zipFile.getReader(), metadata));
               const entryLimit = pLimit(8);
               const entryTasks = entries.map((entry) =>
                 entryLimit(async () => {
-                  const targetPath = path.join(dest, entry.fileName);
+                  // When noFolders is true, use only the basename of each file
+                  // Otherwise, preserve the full path structure
+                  const fileName = options.noFolders ? path.basename(entry.fileName) : entry.fileName;
+                  const targetPath = path.join(dest, fileName);
+                  const targetDir = path.dirname(targetPath);
+                  await fs.mkdir(targetDir, { recursive: true });
+                  const readStream = await entry.createReadStream();
+                  const writeStream = createWriteStream(targetPath);
+                  return pipeline(readStream, writeStream);
+                }),
+              );
+              await Promise.all(entryTasks);
+              results.push({ source: originalSource, success: true });
+            } catch (error) {
+              results.push({
+                source: originalSource,
+                success: false,
+                error: error instanceof Error ? error : new Error(String(error)),
+              });
+            }
+            return;
+          }
+
+          // Handle folder extraction (innerPath ends with '/')
+          if (innerPath.endsWith('/')) {
+            try {
+              // Find all entries that start with the folder prefix, excluding directory entries
+              const matchingMetadatas = entryMetadatas.filter(
+                (m) => m.fileName.startsWith(innerPath) && !m.fileName.endsWith('/'),
+              );
+
+              if (matchingMetadatas.length === 0) {
+                results.push({
+                  source: originalSource,
+                  success: false,
+                  error: new Error(`No entries found under folder ${innerPath} in ${node.zipPath}`),
+                });
+                return;
+              }
+
+              const entries = matchingMetadatas.map((metadata) => ZipEntry.fromMetadata(zipFile.getReader(), metadata));
+              const entryLimit = pLimit(8);
+              const entryTasks = entries.map((entry) =>
+                entryLimit(async () => {
+                  // When noFolders is true, use only the basename of each file
+                  // Otherwise, preserve the full path structure
+                  const fileName = options.noFolders ? path.basename(entry.fileName) : entry.fileName;
+                  const targetPath = path.join(dest, fileName);
                   const targetDir = path.dirname(targetPath);
                   await fs.mkdir(targetDir, { recursive: true });
                   const readStream = await entry.createReadStream();
@@ -343,13 +402,9 @@ export class AdvZlib {
           try {
             const entry = ZipEntry.fromMetadata(zipFile.getReader(), metadata);
 
-            // Check if extracting a folder entry with noFolders option
-            if (options.noFolders && entry.fileName.endsWith('/')) {
-              results.push({
-                source: originalSource,
-                success: false,
-                error: new Error('noFolders option cannot be used when extracting folder entries'),
-              });
+            // Skip folder entries (directories) - they have no content to extract
+            if (entry.fileName.endsWith('/')) {
+              results.push({ source: originalSource, success: true });
               return;
             }
 
@@ -610,17 +665,50 @@ export class AdvZlib {
       if (isNonNested) {
         if (currentInnerPath === '') {
           // If inner path is empty, then extract all entries in the zip file
-          if (options.noFolders) {
-            throw new Error('noFolders option cannot be used when extracting entire ZIP contents');
-          }
           const cd = await zipFile.getCentralDirectory();
           const entryMetadatas = await cd.getAllEntryMetadatas();
-          const entries = entryMetadatas.map((metadata) => ZipEntry.fromMetadata(zipFile.getReader(), metadata));
+          // Filter out directory entries when extracting
+          const fileMetadatas = entryMetadatas.filter((m) => !m.fileName.endsWith('/'));
+          const entries = fileMetadatas.map((metadata) => ZipEntry.fromMetadata(zipFile.getReader(), metadata));
 
           const limit = pLimit(8); // means at most 8 concurrent extract operations
           const tasks = entries.map((entry) =>
             limit(async () => {
-              const targetPath = path.join(dest, entry.fileName);
+              // When noFolders is true, use only the basename of each file
+              // Otherwise, preserve the full path structure
+              const fileName = options.noFolders ? path.basename(entry.fileName) : entry.fileName;
+              const targetPath = path.join(dest, fileName);
+              const targetDir = path.dirname(targetPath);
+              await fs.mkdir(targetDir, { recursive: true });
+              const readStream = await entry.createReadStream();
+              const writeStream = createWriteStream(targetPath);
+              return pipeline(readStream, writeStream);
+            }),
+          );
+          await Promise.all(tasks);
+          return;
+        } else if (currentInnerPath.endsWith('/')) {
+          // If inner path ends with '/', extract all entries under that folder
+          const cd = await zipFile.getCentralDirectory();
+          const entryMetadatas = await cd.getAllEntryMetadatas();
+          // Find all entries that start with the folder prefix, excluding directory entries
+          const matchingMetadatas = entryMetadatas.filter(
+            (m) => m.fileName.startsWith(currentInnerPath) && !m.fileName.endsWith('/'),
+          );
+
+          if (matchingMetadatas.length === 0) {
+            throw new Error(`No entries found under folder ${currentInnerPath} in ${currentZipSourcePath}`);
+          }
+
+          const entries = matchingMetadatas.map((metadata) => ZipEntry.fromMetadata(zipFile.getReader(), metadata));
+
+          const limit = pLimit(8);
+          const tasks = entries.map((entry) =>
+            limit(async () => {
+              // When noFolders is true, use only the basename of each file
+              // Otherwise, preserve the full path structure
+              const fileName = options.noFolders ? path.basename(entry.fileName) : entry.fileName;
+              const targetPath = path.join(dest, fileName);
               const targetDir = path.dirname(targetPath);
               await fs.mkdir(targetDir, { recursive: true });
               const readStream = await entry.createReadStream();
@@ -641,9 +729,9 @@ export class AdvZlib {
           if (!selectedEntry) {
             throw new Error(`Entry ${currentInnerPath} not found in ${currentZipSourcePath}`);
           }
-          // Check if extracting a folder entry with noFolders option
-          if (options.noFolders && selectedEntry.fileName.endsWith('/')) {
-            throw new Error('noFolders option cannot be used when extracting folder entries');
+          // Skip folder entries (directories) - they have no content to extract
+          if (selectedEntry.fileName.endsWith('/')) {
+            return;
           }
           // Use basename if noFolders is true, otherwise use full path
           const fileName = options.noFolders ? path.basename(selectedEntry.fileName) : selectedEntry.fileName;
