@@ -141,7 +141,7 @@ export class AdvZlib {
    * @example
    * // Extract all entries under a folder (note trailing slash)
    * await advZlib.extract('/path/to/archive.zip/folder/', '/dest');
-   * // Result: /dest/folder/file1.txt, /dest/folder/sub/file2.txt, etc.
+   * // Result: /dest/file1.txt, /dest/sub/file2.txt, etc. (folder prefix is stripped)
    *
    * @example
    * // Extract specific file without folder structure
@@ -158,6 +158,11 @@ export class AdvZlib {
    * // Extract from nested ZIP preserving folder structure
    * await advZlib.extract('/outer.zip/inner.zip/folder/file.txt', '/dest');
    * // Result: /dest/folder/file.txt
+   *
+   * @example
+   * // Extract folder from nested ZIP (note trailing slash)
+   * await advZlib.extract('/outer.zip/inner.zip/folder/', '/dest');
+   * // Result: /dest/file.txt, /dest/sub/file2.txt, etc. (folder prefix is stripped)
    *
    * @example
    * // Extract from nested ZIP without folder structure
@@ -322,8 +327,10 @@ export class AdvZlib {
               const entryTasks = entries.map((entry) =>
                 entryLimit(async () => {
                   // When noFolders is true, use only the basename of each file
-                  // Otherwise, preserve the full path structure
-                  const fileName = options.noFolders ? path.basename(entry.fileName) : entry.fileName;
+                  // Otherwise, strip the folder prefix (if any)
+                  const fileName = options.noFolders
+                    ? path.basename(entry.fileName)
+                    : entry.fileName.slice(innerPath.length);
                   const targetPath = path.join(dest, fileName);
                   const targetDir = path.dirname(targetPath);
                   await fs.mkdir(targetDir, { recursive: true });
@@ -366,8 +373,10 @@ export class AdvZlib {
               const entryTasks = entries.map((entry) =>
                 entryLimit(async () => {
                   // When noFolders is true, use only the basename of each file
-                  // Otherwise, preserve the full path structure
-                  const fileName = options.noFolders ? path.basename(entry.fileName) : entry.fileName;
+                  // Otherwise, strip the folder prefix
+                  const fileName = options.noFolders
+                    ? path.basename(entry.fileName)
+                    : entry.fileName.slice(innerPath.length);
                   const targetPath = path.join(dest, fileName);
                   const targetDir = path.dirname(targetPath);
                   await fs.mkdir(targetDir, { recursive: true });
@@ -675,8 +684,10 @@ export class AdvZlib {
           const tasks = entries.map((entry) =>
             limit(async () => {
               // When noFolders is true, use only the basename of each file
-              // Otherwise, preserve the full path structure
-              const fileName = options.noFolders ? path.basename(entry.fileName) : entry.fileName;
+              // Otherwise, strip the folder prefix (if any)
+              const fileName = options.noFolders
+                ? path.basename(entry.fileName)
+                : entry.fileName.slice(currentInnerPath.length);
               const targetPath = path.join(dest, fileName);
               const targetDir = path.dirname(targetPath);
               await fs.mkdir(targetDir, { recursive: true });
@@ -706,8 +717,10 @@ export class AdvZlib {
           const tasks = entries.map((entry) =>
             limit(async () => {
               // When noFolders is true, use only the basename of each file
-              // Otherwise, preserve the full path structure
-              const fileName = options.noFolders ? path.basename(entry.fileName) : entry.fileName;
+              // Otherwise, strip the folder prefix
+              const fileName = options.noFolders
+                ? path.basename(entry.fileName)
+                : entry.fileName.slice(currentInnerPath.length);
               const targetPath = path.join(dest, fileName);
               const targetDir = path.dirname(targetPath);
               await fs.mkdir(targetDir, { recursive: true });

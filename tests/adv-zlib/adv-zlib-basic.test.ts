@@ -1600,18 +1600,18 @@ describe('AdvZlib', () => {
         await expect(stat(join(dest, 'folder2'))).rejects.toThrow();
       });
 
-      it('should preserve folder structure when extracting folder contents without noFolders', async () => {
-        const dest = join(noFoldersDestDir, 'folder-preserve');
+      it('should strip folder prefix when extracting folder contents without noFolders', async () => {
+        const dest = join(noFoldersDestDir, 'folder-strip-prefix');
         await mkdir(dest, { recursive: true });
 
-        // Extract without noFolders (default behavior)
+        // Extract without noFolders (default behavior now strips prefix for folder extraction)
         await advZlib.extract(`${noFoldersSimpleZipPath}/folder1/`, dest);
 
-        // Files should preserve their full paths
-        const file2Content = await readFile(join(dest, 'folder1', 'file2.txt'), 'utf-8');
+        // Files should have the prefix stripped
+        const file2Content = await readFile(join(dest, 'file2.txt'), 'utf-8');
         expect(file2Content).toBe('File in folder1');
 
-        const file3Content = await readFile(join(dest, 'folder1', 'folder2', 'file3.txt'), 'utf-8');
+        const file3Content = await readFile(join(dest, 'folder2/file3.txt'), 'utf-8');
         expect(file3Content).toBe('File in nested folders');
       });
     });
@@ -2777,16 +2777,16 @@ describe('AdvZlib', () => {
         await advZlib.extract(`${folderExtractZipPath}/folder/`, dest);
 
         // Check that all files under folder/ were extracted
-        const file1Content = await readFile(join(dest, 'folder/file1.txt'), 'utf-8');
+        const file1Content = await readFile(join(dest, 'file1.txt'), 'utf-8');
         expect(file1Content).toBe('Content of file1');
 
-        const file2Content = await readFile(join(dest, 'folder/file2.txt'), 'utf-8');
+        const file2Content = await readFile(join(dest, 'file2.txt'), 'utf-8');
         expect(file2Content).toBe('Content of file2');
 
-        const deepContent = await readFile(join(dest, 'folder/sub/deep.txt'), 'utf-8');
+        const deepContent = await readFile(join(dest, 'sub/deep.txt'), 'utf-8');
         expect(deepContent).toBe('Deep file content');
 
-        const anotherContent = await readFile(join(dest, 'folder/sub/another.txt'), 'utf-8');
+        const anotherContent = await readFile(join(dest, 'sub/another.txt'), 'utf-8');
         expect(anotherContent).toBe('Another deep file');
 
         // Verify other folder was not extracted
@@ -2805,14 +2805,14 @@ describe('AdvZlib', () => {
         await advZlib.extract(`${folderExtractZipPath}/folder/sub/`, dest);
 
         // Check that only sub/ contents were extracted
-        const deepContent = await readFile(join(dest, 'folder/sub/deep.txt'), 'utf-8');
+        const deepContent = await readFile(join(dest, 'deep.txt'), 'utf-8');
         expect(deepContent).toBe('Deep file content');
 
-        const anotherContent = await readFile(join(dest, 'folder/sub/another.txt'), 'utf-8');
+        const anotherContent = await readFile(join(dest, 'another.txt'), 'utf-8');
         expect(anotherContent).toBe('Another deep file');
 
         // Verify folder/file1.txt was not extracted (it's not under folder/sub/)
-        const file1Exists = existsSync(join(dest, 'folder/file1.txt'));
+        const file1Exists = existsSync(join(dest, 'file1.txt'));
         expect(file1Exists).toBe(false);
       });
 
@@ -2861,13 +2861,13 @@ describe('AdvZlib', () => {
         await advZlib.extract(`${folderExtractNestedOuterPath}/inner-folder.zip/data/`, dest);
 
         // Check that data/ contents were extracted
-        const item1Content = await readFile(join(dest, 'data/item1.txt'), 'utf-8');
+        const item1Content = await readFile(join(dest, 'item1.txt'), 'utf-8');
         expect(item1Content).toBe('Item 1 content');
 
-        const item2Content = await readFile(join(dest, 'data/item2.txt'), 'utf-8');
+        const item2Content = await readFile(join(dest, 'item2.txt'), 'utf-8');
         expect(item2Content).toBe('Item 2 content');
 
-        const deepContent = await readFile(join(dest, 'data/nested/deep.txt'), 'utf-8');
+        const deepContent = await readFile(join(dest, 'nested/deep.txt'), 'utf-8');
         expect(deepContent).toBe('Nested deep content');
       });
 
@@ -2878,11 +2878,11 @@ describe('AdvZlib', () => {
         await advZlib.extract(`${folderExtractNestedOuterPath}/inner-folder.zip/data/nested/`, dest);
 
         // Only nested/ contents should be extracted
-        const deepContent = await readFile(join(dest, 'data/nested/deep.txt'), 'utf-8');
+        const deepContent = await readFile(join(dest, 'deep.txt'), 'utf-8');
         expect(deepContent).toBe('Nested deep content');
 
         // item1.txt should not be extracted (not under data/nested/)
-        const item1Exists = existsSync(join(dest, 'data/item1.txt'));
+        const item1Exists = existsSync(join(dest, 'item1.txt'));
         expect(item1Exists).toBe(false);
       });
     });
@@ -2902,11 +2902,11 @@ describe('AdvZlib', () => {
         expect(results[1].success).toBe(true);
 
         // Check folder/ contents
-        const file1Content = await readFile(join(dest, 'folder/file1.txt'), 'utf-8');
+        const file1Content = await readFile(join(dest, 'file1.txt'), 'utf-8');
         expect(file1Content).toBe('Content of file1');
 
         // Check other/ contents
-        const otherContent = await readFile(join(dest, 'other/file.txt'), 'utf-8');
+        const otherContent = await readFile(join(dest, 'file.txt'), 'utf-8');
         expect(otherContent).toBe('File in other folder');
       });
 
@@ -2924,7 +2924,7 @@ describe('AdvZlib', () => {
         expect(results[1].success).toBe(true);
 
         // Check folder/sub/ contents
-        const deepContent = await readFile(join(dest, 'folder/sub/deep.txt'), 'utf-8');
+        const deepContent = await readFile(join(dest, 'deep.txt'), 'utf-8');
         expect(deepContent).toBe('Deep file content');
 
         // Check root.txt
@@ -2982,7 +2982,7 @@ describe('AdvZlib', () => {
         expect(results).toHaveLength(1);
         expect(results[0].success).toBe(true);
 
-        const item1Content = await readFile(join(dest, 'data/item1.txt'), 'utf-8');
+        const item1Content = await readFile(join(dest, 'item1.txt'), 'utf-8');
         expect(item1Content).toBe('Item 1 content');
       });
     });
